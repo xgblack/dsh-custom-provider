@@ -1,15 +1,15 @@
 {
-  "name": "dsh-gateway-provider",
-  "version": "1.0.12",
-  "description": "Generic LLM gateway model provider plugin for DeepSeek Harness: mounts newapi / LiteLLM / Higress / any OpenAI-compatible gateway as provider routes, auto-discovers the model list, enriches every model with models.dev parameters, and dispatches each model over its native wire protocol (OpenAI / Anthropic / Gemini) via the pi-ai SDK",
+  "name": "dsh-custom-provider",
+  "version": "0.1.0",
+  "description": "Additional model and provider settings for the built-in dsh llm-pi-ai adapter",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Luck9Star/dsh-gateway-provider.git"
+    "url": "git+https://github.com/xgblack/dsh-custom-provider.git"
   },
   "bugs": {
-    "url": "https://github.com/Luck9Star/dsh-gateway-provider/issues"
+    "url": "https://github.com/xgblack/dsh-custom-provider/issues"
   },
-  "homepage": "https://github.com/Luck9Star/dsh-gateway-provider#readme",
+  "homepage": "https://github.com/xgblack/dsh-custom-provider#readme",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -17,39 +17,15 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
-  "files": [
-    "index.js",
-    "lib",
-    "cordis.patch.yml",
-    "docs"
-  ],
+  "files": ["index.js", "lib/client.js", "cordis.patch.yml", "docs"],
   "scripts": {
-    "prepare": "bash scripts/link.sh",
-    "link": "bash scripts/link.sh",
-    "smoke": "node test/smoke.mjs",
-    "test:session": "node test/session-affinity.mjs",
-    "test:client": "node test/client-render.mjs",
-    "test:client-api": "node test/client-api.mjs",
-    "test:urls": "node test/protocol-urls.mjs",
-    "test:schema": "node test/schema-coercion.mjs",
-    "test:errors": "node test/error-codes.mjs"
+    "build": "node scripts/build-client.mjs",
+    "prepack": "npm run build",
+    "test": "npm run build && node test/config.mjs && node test/client.mjs",
+    "test:config": "node test/config.mjs",
+    "test:client": "node test/client.mjs"
   },
-  "keywords": [
-    "deepseek-harness",
-    "dsh",
-    "cordis",
-    "llm",
-    "llm-provider",
-    "provider",
-    "newapi",
-    "new-api",
-    "openai",
-    "anthropic",
-    "gemini",
-    "models.dev",
-    "dsh-plugin",
-    "pi-ai"
-  ],
+  "keywords": ["deepseek-harness", "dsh", "llm", "model-settings", "pi-ai"],
   "license": "MIT",
   "dsh": {
     "client": {
@@ -57,23 +33,11 @@
         "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-api-gateway",
         "@deepseek-ai/dsh-api-remotes",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-models"
       ],
       "platform": "web"
     },
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    }
-  },
-  "dependencies": {
-    "@earendil-works/pi-ai": "0.84.4"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-credentials": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-launch-environment": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-llm": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-timeout": "^0.1.2-rc.1",
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "bundle": { "patch": "./cordis.patch.yml" }
   }
 }

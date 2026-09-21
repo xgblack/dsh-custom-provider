@@ -5,3 +5,10 @@ node_modules
 .DS_Store
 .dsh-version
 .pnpm-store
+
+.idea
+
+.helloagents
+
+
+

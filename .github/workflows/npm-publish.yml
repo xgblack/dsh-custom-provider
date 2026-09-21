@@ -1,6 +1,6 @@
 # npm Trusted Publishing (OIDC) — no npm token, no OTP.
 # Register this workflow on npmjs.com → package → Settings → Trusted Publisher
-# with: user Luck9Star, repo dsh-gateway-provider, filename npm-publish.yml.
+# with: user xgblack, repo dsh-custom-provider, filename npm-publish.yml.
 name: Publish to npm
 
 on:
@@ -22,10 +22,5 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false # never cache in release builds
-      - run: npm install # installs peerDependencies (no lockfile, zero deps)
-      - run: npm run test:session
-      - run: npm run test:client
-      - run: npm run test:urls
-      - run: npm run test:schema
-      - run: npm run test:errors
+      - run: npm test
       - run: npm publish
