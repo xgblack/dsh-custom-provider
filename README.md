@@ -16,7 +16,7 @@ The output prints a local URL with an access token. The temporary home does not 
 
 ## Model configuration
 
-The page uses a compact provider list, a selected provider editor, and a separate model list below it. No nested side navigation is required. It preserves dsh's own `llm-pi-ai` schema and storage rules.
+The page follows the built-in Models page: providers are rendered as a vertical card list, and each card contains its API key, connection settings, model list, and advanced JSON sections. Models stay inside their provider card instead of being split into a separate navigation pane. It preserves dsh's own `llm-pi-ai` schema and storage rules.
 
 - **Providers** can be activated from the installed catalog or declared with a route ID, endpoint, protocol, and first model. Common fields are display name, endpoint, and protocol; provider Advanced JSON edits only that route's user override. A provider defined in the composition cannot be removed here.
 - **API keys** are never read back into a form or written to settings JSON. The page derives or uses the configured `apiKeyEnv` reference and stores a new key through `remote.credentials`.

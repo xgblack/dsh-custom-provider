@@ -21,7 +21,7 @@
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "prepack": "npm run build",
-    "test": "npm run build && node test/config.mjs && node test/client.mjs",
+    "test": "npm run build && node test/config.mjs && node test/client.mjs && node --test test/render.mjs",
     "test:config": "node test/config.mjs",
     "test:client": "node test/client.mjs"
   },
@@ -39,5 +39,10 @@
       "platform": "web"
     },
     "bundle": { "patch": "./cordis.patch.yml" }
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   }
 }
