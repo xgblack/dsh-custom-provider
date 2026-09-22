@@ -131,6 +131,10 @@ test("creating a provider renders its card and working model search", async (t) 
   await createProvider(container);
   assert.deepEqual(fake.view.user.providers["team-gateway"].models, [{ id: "deepseek-chat", name: "DeepSeek Chat" }]);
   assert.match(container.textContent, /团队网关/);
+  const customProtocol = container.querySelector("#dcp-provider-api-team-gateway");
+  assert.ok(customProtocol);
+  assert.equal([...customProtocol.options].some((option) => option.value === ""), false,
+    "custom providers cannot inherit a catalog protocol");
   assert.ok(container.querySelector('[aria-label="模型 ID deepseek-chat"]'));
   const search = container.querySelector('[aria-label="搜索模型"]');
   await input(search, "nothing-matches");

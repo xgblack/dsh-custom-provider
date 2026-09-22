@@ -18,7 +18,7 @@ The output prints a local URL with an access token. The temporary home does not 
 
 The page follows the built-in Models page: providers are rendered as a vertical card list, and each card contains its API key, connection settings, and model list. Each expanded model owns its JSON editor. Models stay inside their provider card instead of being split into a separate navigation pane. It preserves dsh's own `llm-pi-ai` schema and storage rules.
 
-- **Providers** are added through one **Add model provider** entry. Choose a third-party catalog provider or declare a custom route with an ID, endpoint, and protocol. A new custom provider starts with an empty model list; enter the API key first, then use **Fetch available models** to populate it and remove models that are not needed. A provider defined in the composition cannot be removed here.
+- **Providers** are added through one **Add model provider** entry. Choose a third-party catalog provider or declare a custom route with an ID, endpoint, and protocol. A new custom provider starts with an empty model list; enter the API key first, then use **Fetch available models** to populate it and remove models that are not needed. Custom providers must choose an explicit protocol; **Inherit catalog** is available only for installed catalog providers. A provider defined in the composition cannot be removed here.
 - **API keys** are never read back into a form or written to settings JSON. The page derives or uses the configured `apiKeyEnv` reference and stores a new key through `remote.credentials`.
 - **Models** in an explicit user list can be added or removed. Installed catalog entries remain in the catalog and are customized through per-model overrides; an inherited composition list remains read-only.
 
