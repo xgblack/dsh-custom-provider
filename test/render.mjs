@@ -94,7 +94,8 @@ async function settle() {
   for (let at = 0; at < 10; at += 1) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
 async function createProvider(container) {
-  await click(button(container, "添加自定义提供方"));
+  await click(button(container, "添加模型供应商"));
+  await click(button(container, "自定义模型 API"));
   await input(container.querySelector("#dcp-create-route"), "team-gateway");
   await input(container.querySelector("#dcp-create-name"), "团队网关");
   await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
@@ -108,10 +109,14 @@ async function createProvider(container) {
 
 test("custom provider discovery can be edited before creation", async (t) => {
   const { container, fake } = await mount(t);
-  await click(button(container, "添加自定义提供方"));
+  await click(button(container, "添加模型供应商"));
+  await click(button(container, "自定义模型 API"));
   await input(container.querySelector("#dcp-create-route"), "draft-gateway");
   await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
-  await click(button(container, "获取可用模型"));
+  const keyField = container.querySelector("#dcp-create-key");
+  const fetchButton = button(container, "获取可用模型");
+  assert.equal(keyField.compareDocumentPosition(fetchButton) & 4, 4, "API Key is above model discovery");
+  await click(fetchButton);
   await settle();
   assert.match(container.textContent, /DeepSeek Chat/);
   const remove = [...container.querySelectorAll("button")].find((el) => el.textContent.trim() === "移除");
@@ -135,8 +140,14 @@ test("creating a provider renders its card and working model search", async (t) 
   await click(button(container, "展开模型 deepseek-chat"));
   const modelAdvanced = container.querySelector(".dcp-model-advanced");
   assert.ok(modelAdvanced);
-  assert.equal(modelAdvanced.querySelectorAll('input[type="radio"]').length, 7, "input and reasoning use single-choice controls");
-  assert.ok([...modelAdvanced.querySelectorAll('input[type="radio"]')].some((input) => input.value === "custom"));
+  assert.match(container.textContent, /编辑 JSON/);
+  assert.doesNotMatch(container.textContent, /提供方高级 JSON/);
+  assert.equal(modelAdvanced.querySelectorAll('input[role="switch"]').length, 2, "input and reasoning have independent configuration switches");
+  await click(modelAdvanced.querySelectorAll('input[role="switch"]')[0]);
+  assert.equal(modelAdvanced.querySelectorAll('.dcp-choice-group input[type="checkbox"]').length, 2, "input types use official checkboxes");
+  await click([...modelAdvanced.querySelectorAll('.dcp-choice-group input[type="checkbox"]')].find((input) => input.value === "image"));
+  const reasoningSwitch = modelAdvanced.querySelectorAll('input[role="switch"]')[1];
+  await click(reasoningSwitch);
   const reasoningCustom = [...modelAdvanced.querySelectorAll('input[type="radio"]')].find((input) => input.name.endsWith("-reasoning") && input.value === "custom");
   await click(reasoningCustom);
   assert.equal(modelAdvanced.querySelectorAll(".dcp-level-row").length, 4, "custom reasoning starts with off/low/high/max");
@@ -147,6 +158,8 @@ test("creating a provider renders its card and working model search", async (t) 
   await click(button(container, "保存模型"));
   await settle();
   assert.equal(fake.view.user.providers["team-gateway"].models[0].contextWindow, 1000000);
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models[0].input, ["text", "image"]);
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models[0].reasoningEfforts, { off: null, low: "low", high: "high", max: "max" });
   await input(search, "");
   const removeModel = button(container, "删除模型 deepseek-chat");
   assert.equal(removeModel.disabled, false);
