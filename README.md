@@ -1,35 +1,37 @@
 # dsh-custom-provider
 
-An additional settings editor for the built-in DeepSeek Harness `llm-pi-ai` adapter. It adds **Advanced settings** inside each `llm-pi-ai` provider card in **Settings → Models**. It does not create provider routes, discover gateway models, handle credentials, or dispatch requests.
+A focused model configuration page for the built-in DeepSeek Harness `llm-pi-ai` adapter. It adds **Model configuration** immediately below **Models** in Settings. The official Models page remains untouched and continues to own providers, credentials, endpoints, protocols, and model-list management.
 
 ## Install
 
-The `llm-pi-ai` plugin and the web Models settings page must be enabled in the same dsh profile. From this checkout, run a non-installing local preview:
+The `llm-pi-ai` plugin and the Web Settings surface must be enabled in the same dsh profile. From this checkout, run a non-installing local preview:
 
 ```sh
 dsh --profile web --patch test/local.patch.yml --no-open --port 0
 ```
 
-The output prints a local URL with an access token. To install persistently, use `dsh plugin --profile web add "$PWD"` from this repository; `dsh-custom-provider` becomes an npm install target only after publication. The bundle patch inserts the `dsh-custom-provider` row; do not add a second row with the same id. The built-in Models page remains the place to add providers, set credentials, and edit model name/capacity/input and connection basics.
+The output prints a local URL with an access token. To install persistently, use `dsh plugin --profile web add "$PWD"` from this repository; `dsh-custom-provider` becomes an npm install target only after publication. The bundle patch already inserts the `dsh-custom-provider` row, so do not add a second row with the same id.
 
-## Editing
+## Model configuration
 
-- Provider fields include `compat`, `reasoning`, `thinkingBudgets`, request timeouts, transport, headers, retry policy, defaults, and image budgets. Model fields include `reasoningEfforts` and `compat`. The controls follow the installed `llm-pi-ai` settings schema.
-- **Save** writes a single user override to the real `llm-pi-ai` section of `~/.dsh/settings.yaml`. **Restore** removes that override and follows the built-in configuration inheritance again. Nested maps and arrays use JSON input; invalid values are rejected without clearing the draft.
-- An explicit user `models` list is updated as one array, preserving other entries. A list inherited from the profile composition is read-only here, because changing one entry would replace the whole inherited list. A route using the built-in model catalog instead writes `modelOverrides.<model-id>`; enter an exact built-in model id to add an override. The host rejects ids not in the installed catalog.
-- models.dev data is a read-only comparison for name, context window, output limit and input modalities. It is not part of the adapter's inheritance chain and never writes configuration. A suffix match is shown only when unique.
+The page follows the provider-to-model navigation used by [pi-web](https://github.com/agegr/pi-web), while preserving dsh's own `llm-pi-ai` schema and storage rules.
 
-The displayed values are the **resolved settings**, not necessarily the final model capabilities after the adapter combines them with its installed catalog. The host performs the final compatibility and serviceability validation. A stale settings revision is rejected and the card reloads before another edit.
+- **Common** exposes model name, reasoning capability, input types, context window, and output limit. Empty values inherit from the provider or installed catalog. Standard reasoning writes an explicit dsh effort map; protocol-specific maps stay available in Advanced JSON.
+- **Advanced JSON** contains only the selected model object. It never replaces its provider or sibling models. The model id is fixed so an edit cannot move data to another model.
+- An explicit user `models` list is committed as one array after replacing only the selected entry. Other entries and hidden fields are preserved.
+- A built-in catalog model writes only `modelOverrides.<model-id>`. Saving `{ "id": "..." }` removes that model's user override. A model list inherited from the profile composition remains read-only because editing one row would otherwise replace the whole inherited list.
+
+Every write targets the real `llm-pi-ai` namespace and includes the current settings revision. Client schema validation runs before mutation; host rejection is shown without clearing the draft. A revision conflict refreshes the underlying values while preserving the unsaved editor draft for review.
 
 ## Development
 
 ```sh
 npm run build   # generate lib/client.js from lib/client.source.js + lib/config.js
-npm test        # configuration paths and client slot registration
+npm test        # model-scope operations, failure paths, and section registration
 npm pack --dry-run
 ```
 
-The client bundle is generated and committed because dsh loads `exports["./client"]` directly. This plugin has no runtime npm dependencies. A real-host acceptance check should edit an advanced field in Settings → Models, inspect the corresponding `llm-pi-ai` key in `settings.yaml`, restore it, restart dsh, and confirm the namespace and route remain available. Schema-only checks cannot prove the adapter's wire behavior.
+`lib/client.js` is generated and committed because dsh loads `exports["./client"]` directly. This plugin has no runtime npm dependencies. Real-host acceptance should confirm the Settings navigation order, catalog discovery, one common-field save, one Advanced JSON save, conflict behavior, restore behavior, and persistence after restart.
 
 ## Attribution
 

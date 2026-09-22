@@ -1,0 +1,4 @@
+# Load this checkout for an isolated --patch web smoke test.
+- insert:
+    - id: dsh-custom-provider
+      name: '../index.js'

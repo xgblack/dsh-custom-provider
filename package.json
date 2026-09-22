@@ -1,7 +1,7 @@
 {
   "name": "dsh-custom-provider",
   "version": "0.1.0",
-  "description": "Additional model and provider settings for the built-in dsh llm-pi-ai adapter",
+  "description": "A focused model configuration page for the built-in dsh llm-pi-ai adapter",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/xgblack/dsh-custom-provider.git"
