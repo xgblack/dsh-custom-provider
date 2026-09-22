@@ -1,13 +1,23 @@
 import assert from "node:assert/strict";
 import {
+  addModelOperation,
+  availableCatalogProviders,
   candidate,
   commitOperation,
+  createProviderOperation,
+  derivedKeyRef,
   editableModel,
   effectiveModel,
   modelEntries,
   modelMode,
   parseModelJson,
   patchModelOperation,
+  patchProviderOperation,
+  providerKind,
+  providerRemovable,
+  removeModelOperation,
+  removeProviderOperation,
+  replaceProviderOperation,
   replaceModelOperation
 } from "../lib/config.js";
 
@@ -96,6 +106,52 @@ const entries = modelEntries(catalog, route, [
 assert.deepEqual(entries.map((model) => model.id), ["builtin", "second"]);
 assert.equal(entries[0].maxTokens, 8000);
 
+const providerView = {
+  value: { providers: { deepseek: { api: "openai-completions", baseURL: "https://old.example/v1", models: [{ id: "a" }] },
+    sibling: { apiKeyEnv: "SIBLING_API_KEY" } } },
+  user: { providers: { deepseek: { baseURL: "https://old.example/v1", models: [{ id: "a" }] },
+    sibling: { apiKeyEnv: "SIBLING_API_KEY" } } },
+  base: { providers: { deepseek: { api: "openai-completions" } } },
+  revision: 12, schema: {}
+};
+assert.equal(derivedKeyRef("my-gateway"), "MY_GATEWAY_API_KEY");
+assert.equal(providerRemovable(providerView, "deepseek"), false);
+assert.equal(providerRemovable(providerView, "sibling"), true);
+assert.equal(providerKind(providerView, "deepseek", [{ provider: "deepseek", declared: false }]), "catalog");
+assert.equal(providerKind(providerView, "sibling", [{ provider: "sibling", declared: true }]), "custom");
+assert.equal(providerKind(providerView, "deepseek", []), "inherited");
+assert.deepEqual(availableCatalogProviders([
+  { provider: "deepseek", declared: false }, { provider: "sibling", declared: true },
+  { provider: "free", declared: false }
+], ["deepseek"]).map((entry) => entry.provider), ["free"]);
+assert.throws(() => removeProviderOperation(providerView, "deepseek"), /Inherited providers/);
+assert.deepEqual(removeProviderOperation(providerView, "sibling"), { op: "unset", path: ["providers", "sibling"] });
+const patchProvider = patchProviderOperation(providerView, "deepseek", { displayName: "Local", baseURL: undefined });
+assert.deepEqual(patchProvider, [
+  { op: "set", path: ["providers", "deepseek", "displayName"], value: "Local" },
+  { op: "unset", path: ["providers", "deepseek", "baseURL"] }
+]);
+const providerCandidate = candidate(providerView, patchProvider);
+assert.equal(providerCandidate.providers.deepseek.api, "openai-completions");
+assert.deepEqual(providerCandidate.providers.sibling, { apiKeyEnv: "SIBLING_API_KEY" });
+assert.deepEqual(replaceProviderOperation(providerView, "deepseek", { displayName: "New" }).map(({ op, path }) => ({ op, path })), [
+  { op: "unset", path: ["providers", "deepseek", "baseURL"] },
+  { op: "unset", path: ["providers", "deepseek", "models"] },
+  { op: "set", path: ["providers", "deepseek", "displayName"] }
+]);
+assert.throws(() => createProviderOperation(providerView, "deepseek", {}), /already exists/);
+assert.throws(() => createProviderOperation(providerView, "Acme", {}), /Provider ID/);
+assert.throws(() => createProviderOperation(providerView, "built-in", {}, ["built-in"]), /already exists/);
+const createProvider = createProviderOperation(providerView, "acme-gateway", { api: "openai-responses", models: [{ id: "new" }] });
+assert.deepEqual(createProvider.path, ["providers", "acme-gateway"]);
+assert.deepEqual(candidate(providerView, createProvider).providers.sibling, providerView.value.providers.sibling);
+const added = addModelOperation(providerView, "deepseek", { id: "b" });
+assert.deepEqual(added.value, [{ id: "a" }, { id: "b" }]);
+assert.throws(() => removeModelOperation(providerView, "deepseek", "a"), /last model/);
+assert.deepEqual(removeModelOperation(listed, route, "a").value, [{ id: "b", name: "B" }]);
+assert.throws(() => addModelOperation(catalog, route, { id: "new" }), /explicit user model list/);
+assert.throws(() => addModelOperation(providerView, "deepseek", { id: "a" }), /already exists/);
+
 const schema = { rehydrate: () => ({}), validate: () => undefined };
 let mutation;
 const successApi = { settings: { mutate: async (...args) => {
@@ -107,6 +163,15 @@ assert.equal(written.kind, "written");
 assert.equal(mutation[0], "llm-pi-ai");
 assert.equal(mutation[2], 7, "the expected revision is forwarded");
 assert.deepEqual(mutation[1], [common]);
+const writtenProvider = await commitOperation(successApi, schema, providerView, patchProvider);
+assert.equal(writtenProvider.kind, "written");
+assert.deepEqual(mutation[1], patchProvider, "provider field operations are committed together");
+assert.equal(mutation[2], 12);
+let staleMutated = false;
+const staleDraft = await commitOperation({ settings: { mutate: async () => { staleMutated = true; } } },
+  schema, providerView, patchProvider, 11);
+assert.equal(staleDraft.kind, "conflict");
+assert.equal(staleMutated, false, "an old JSON draft never writes with a new revision");
 
 let invalidMutated = false;
 const invalid = await commitOperation({ settings: { mutate: async () => { invalidMutated = true; } } },
@@ -124,4 +189,4 @@ const conflict = await commitOperation({ settings: { mutate: async () => ({
 }) } }, schema, listed, common);
 assert.deepEqual(conflict, { kind: "conflict", message: "stale revision" });
 
-console.log("config: model scope, sibling preservation, validation, rejection and conflict checks passed");
+console.log("config: provider/model scope, sibling preservation, validation, rejection and conflict checks passed");

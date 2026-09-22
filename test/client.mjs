@@ -20,12 +20,13 @@ const client = plugin.factory((name) => {
   assert.equal(name, "react");
   return { createElement: () => ({}) };
 });
-assert.deepEqual(Array.from(client.inject), ["slots", "remote", "remote.settings", "remote.llm", "settingsSchema"]);
+assert.deepEqual(Array.from(client.inject), ["slots", "remote", "remote.settings", "remote.credentials", "remote.llm", "settingsSchema"]);
 
 let registration;
 const services = {
   remote: { $on: () => () => {} },
   "remote.settings": {},
+  "remote.credentials": {},
   "remote.llm": {}
 };
 client.apply({
@@ -46,6 +47,7 @@ assert.equal(typeof registration.options.inject, "function");
 assert.equal(typeof registration.component, "function");
 const injected = registration.options.inject();
 assert.equal(injected.api.settings, services["remote.settings"]);
+assert.equal(injected.api.credentials, services["remote.credentials"]);
 assert.equal(injected.api.llm, services["remote.llm"]);
 
 console.log("client: independent Model configuration section registration passed");
