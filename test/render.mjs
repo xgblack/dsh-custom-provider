@@ -90,28 +90,72 @@ async function input(el, value) {
     el.dispatchEvent(new window.Event("input", { bubbles: true }));
   });
 }
+async function settle() {
+  for (let at = 0; at < 10; at += 1) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+}
 async function createProvider(container) {
   await click(button(container, "添加自定义提供方"));
   await input(container.querySelector("#dcp-create-route"), "team-gateway");
   await input(container.querySelector("#dcp-create-name"), "团队网关");
   await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
-  await input(container.querySelector("#dcp-create-model"), "team-chat");
+  assert.equal(container.querySelector("#dcp-create-model"), null, "a provider starts without a model id");
+  await click(button(container, "获取可用模型"));
+  await settle();
   await click(button(container, "添加"));
+  await settle();
   assert.equal(container.querySelector('[role="alert"]')?.textContent, undefined);
 }
+
+test("custom provider discovery can be edited before creation", async (t) => {
+  const { container, fake } = await mount(t);
+  await click(button(container, "添加自定义提供方"));
+  await input(container.querySelector("#dcp-create-route"), "draft-gateway");
+  await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
+  await click(button(container, "获取可用模型"));
+  await settle();
+  assert.match(container.textContent, /DeepSeek Chat/);
+  const remove = [...container.querySelectorAll("button")].find((el) => el.textContent.trim() === "移除");
+  assert.ok(remove);
+  await click(remove);
+  assert.match(container.textContent, /尚未获取模型/);
+  assert.equal(fake.view.user.providers["draft-gateway"], undefined);
+});
 
 test("creating a provider renders its card and working model search", async (t) => {
   const { container, fake } = await mount(t);
   await createProvider(container);
-  assert.equal(fake.view.user.providers["team-gateway"].models[0].id, "team-chat");
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models, [{ id: "deepseek-chat", name: "DeepSeek Chat" }]);
   assert.match(container.textContent, /团队网关/);
-  assert.ok(container.querySelector('[aria-label="模型 ID team-chat"]'));
+  assert.ok(container.querySelector('[aria-label="模型 ID deepseek-chat"]'));
   const search = container.querySelector('[aria-label="搜索模型"]');
   await input(search, "nothing-matches");
-  assert.equal(container.querySelector('[aria-label="模型 ID team-chat"]'), null);
-  await input(search, "team");
-  assert.ok(container.querySelector('[aria-label="模型 ID team-chat"]'));
+  assert.equal(container.querySelector('[aria-label="模型 ID deepseek-chat"]'), null);
+  await input(search, "deepseek");
+  assert.ok(container.querySelector('[aria-label="模型 ID deepseek-chat"]'));
+  await click(button(container, "展开模型 deepseek-chat"));
+  const modelAdvanced = container.querySelector(".dcp-model-advanced");
+  assert.ok(modelAdvanced);
+  assert.equal(modelAdvanced.querySelectorAll('input[type="radio"]').length, 7, "input and reasoning use single-choice controls");
+  assert.ok([...modelAdvanced.querySelectorAll('input[type="radio"]')].some((input) => input.value === "custom"));
+  const reasoningCustom = [...modelAdvanced.querySelectorAll('input[type="radio"]')].find((input) => input.name.endsWith("-reasoning") && input.value === "custom");
+  await click(reasoningCustom);
+  assert.equal(modelAdvanced.querySelectorAll(".dcp-level-row").length, 4, "custom reasoning starts with off/low/high/max");
+  await click(modelAdvanced.parentElement.querySelector("summary"));
+  const contextLabel = [...modelAdvanced.querySelectorAll("label")].find((label) => label.textContent === "上下文窗口");
+  await input(document.getElementById(contextLabel.htmlFor), "1M");
+  assert.match(modelAdvanced.parentElement.querySelector("textarea").value, /"contextWindow": 1000000/);
+  await click(button(container, "保存模型"));
+  await settle();
+  assert.equal(fake.view.user.providers["team-gateway"].models[0].contextWindow, 1000000);
+  await input(search, "");
+  const removeModel = button(container, "删除模型 deepseek-chat");
+  assert.equal(removeModel.disabled, false);
+  await click(removeModel);
+  await settle();
+  assert.deepEqual(fake.mutations.at(-1), [{ op: "set", path: ["providers", "team-gateway", "models"], value: [] }]);
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models, [], "the last model can be removed");
+  assert.match(container.textContent, /暂无模型/);
   await click(button(container, "收起"));
   await click(button(container, "编辑"));
-  assert.ok(container.querySelector('[aria-label="模型 ID team-chat"]'));
+  assert.match(container.textContent, /暂无模型/);
 });

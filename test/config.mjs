@@ -68,6 +68,16 @@ assert.equal(modelMode(inherited, route), "inherited");
 assert.deepEqual(editableModel(inherited, route, "base"), { id: "base", name: "Base" });
 assert.throws(() => patchModelOperation(inherited, route, "base", { name: "Changed" }), /inherited model list/);
 
+const emptyListed = {
+  value: profile({ models: [] }),
+  base: profile({}),
+  user: profile({ models: [] }),
+  revision: 8,
+  schema: {}
+};
+assert.equal(modelMode(emptyListed, route), "listed", "an explicit empty list remains editable");
+assert.throws(() => removeModelOperation(emptyListed, route, "missing"), /does not exist/);
+
 const catalog = {
   value: profile({
     defaultContextWindow: 32000,
@@ -145,9 +155,11 @@ assert.throws(() => createProviderOperation(providerView, "built-in", {}, ["buil
 const createProvider = createProviderOperation(providerView, "acme-gateway", { api: "openai-responses", models: [{ id: "new" }] });
 assert.deepEqual(createProvider.path, ["providers", "acme-gateway"]);
 assert.deepEqual(candidate(providerView, createProvider).providers.sibling, providerView.value.providers.sibling);
+const emptyProvider = createProviderOperation(providerView, "empty-gateway", { api: "openai-responses", models: [] });
+assert.deepEqual(candidate(providerView, emptyProvider).providers["empty-gateway"].models, []);
 const added = addModelOperation(providerView, "deepseek", { id: "b" });
 assert.deepEqual(added.value, [{ id: "a" }, { id: "b" }]);
-assert.throws(() => removeModelOperation(providerView, "deepseek", "a"), /last model/);
+assert.deepEqual(removeModelOperation(providerView, "deepseek", "a").value, []);
 assert.deepEqual(removeModelOperation(listed, route, "a").value, [{ id: "b", name: "B" }]);
 assert.throws(() => addModelOperation(catalog, route, { id: "new" }), /explicit user model list/);
 assert.throws(() => addModelOperation(providerView, "deepseek", { id: "a" }), /already exists/);
