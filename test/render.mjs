@@ -116,6 +116,8 @@ test("custom provider discovery can be edited before creation", async (t) => {
   const keyField = container.querySelector("#dcp-create-key");
   const fetchButton = button(container, "获取可用模型");
   assert.equal(keyField.compareDocumentPosition(fetchButton) & 4, 4, "API Key is above model discovery");
+  assert.ok(fetchButton.parentElement.classList.contains("dcp-actions"), "model discovery uses the shared actions layout");
+  assert.equal(fetchButton.parentElement.classList.contains("dcp-actions-start"), false, "model discovery is right aligned");
   await click(fetchButton);
   await settle();
   assert.match(container.textContent, /DeepSeek Chat/);
