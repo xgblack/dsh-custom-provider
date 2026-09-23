@@ -138,39 +138,114 @@ test("custom provider discovery can be edited before creation", async (t) => {
   assert.equal(fake.view.user.providers["draft-gateway"], undefined);
 });
 
-test("ID-only discovery fills missing model fields before saving, without importing reasoning guesses", async (t) => {
+test("models.dev is only fetched by the per-model button; manual import saves supported fields as user values", async (t) => {
+  let fetchCount = 0;
   const { container, fake } = await mount(t, (host) => {
     host.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
       { id: "deepseek-v4.1-flash" }, { id: "gpt-6-sol", contextWindow: 900000 }
     ] });
-    host.fetchModelsDev = async () => ({ ok: true, json: async () => ({
+    host.fetchModelsDev = async () => { fetchCount++; return { ok: true, json: async () => ({
       "other/deepseek-v4.1-flash": { limit: { context: 42 } },
       "deepseek/deepseek-v4.1-flash": { name: "DeepSeek V4.1 Flash", limit: { context: 1000000, output: 384000 }, modalities: { input: ["text", "image"] }, reasoning: true },
       "other/gpt-6-sol": { limit: { context: 42 } },
       "openai/gpt-6-sol": { name: "GPT-6 Sol", limit: { context: 1050000, output: 128000 }, modalities: { input: ["text", "image", "pdf"] }, reasoning: true }
-    }) });
+    }) }; };
   });
   await createProvider(container);
+  assert.equal(fetchCount, 0, "provider discovery must not fetch models.dev");
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models, [
+    { id: "deepseek-v4.1-flash" }, { id: "gpt-6-sol", contextWindow: 900000 }
+  ]);
+  await click(button(container, "展开模型 deepseek-v4.1-flash"));
+  const actions = container.querySelector(".dcp-model-entry .dcp-actions");
+  assert.deepEqual([...actions.querySelectorAll("button")].map((el) => el.textContent.trim()),
+    ["恢复继承", "从 models.dev 拉取", "保存模型"]);
+  await click(button(actions, "从 models.dev 拉取"));
+  await settle();
+  assert.equal(fetchCount, 1);
+  assert.match(container.textContent, /已从 models.dev 保存: deepseek\/deepseek-v4\.1-flash/);
+  const deepseekRow = [...container.querySelectorAll(".dcp-model-entry")].find((entry) => entry.querySelector('[aria-label="模型 ID deepseek-v4.1-flash"]'));
+  assert.equal(deepseekRow.querySelector('[aria-label="模型名称 deepseek-v4.1-flash"]').value, "DeepSeek V4.1 Flash");
+  const contextLabel = [...deepseekRow.querySelectorAll(".dcp-model-advanced label")].find((label) => label.textContent === "上下文窗口");
+  assert.equal(document.getElementById(contextLabel.htmlFor).value, "1M", "saved import must fill the editable field");
+  await click(button(container, "展开模型 gpt-6-sol"));
+  const gptRow = [...container.querySelectorAll(".dcp-model-entry")].find((entry) => entry.querySelector('[aria-label="模型 ID gpt-6-sol"]'));
+  await click(button(gptRow, "从 models.dev 拉取"));
+  await settle();
+  assert.equal(fetchCount, 1, "a second manual import within six hours reuses the cache");
   assert.deepEqual(fake.view.user.providers["team-gateway"].models, [
     { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", contextWindow: 1000000, maxTokens: 384000, input: ["text", "image"] },
-    { id: "gpt-6-sol", name: "GPT-6 Sol", contextWindow: 900000, maxTokens: 128000, input: ["text", "image"] }
+    { id: "gpt-6-sol", name: "GPT-6 Sol", contextWindow: 1050000, maxTokens: 128000, input: ["text", "image"] }
   ]);
+  await click(button(container.querySelector(".dcp-model-catalog"), "获取可用模型"));
+  await settle();
+  assert.equal(fetchCount, 1);
+  assert.equal(fake.view.user.providers["team-gateway"].models[1].contextWindow, 1050000, "subsequent provider discovery keeps the imported user value");
 });
 
-test("models.dev failure warns but does not block saving IDs returned by the provider", async (t) => {
+test("models.dev failure only affects manual import, leaving provider values untouched", async (t) => {
+  let fetchCount = 0;
   const { container, fake } = await mount(t, (host) => {
-    host.fetchModelsDev = async () => { throw new Error("offline"); };
+    host.fetchModelsDev = async () => { fetchCount++; throw new Error("offline"); };
   });
-  await click(button(container, "添加模型供应商"));
-  await click(button(container, "自定义模型 API"));
-  await input(container.querySelector("#dcp-create-route"), "team-gateway");
-  await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
-  await click(button(container, "获取可用模型"));
+  await createProvider(container);
+  assert.equal(fetchCount, 0);
+  await click(button(container, "展开模型 deepseek-chat"));
+  await click(button(container, "从 models.dev 拉取"));
   await settle();
-  assert.match(container.querySelector('[role="status"]')?.textContent ?? "", /models.dev 不可用/);
-  await click(button(container, "添加"));
-  await settle();
+  assert.match(container.querySelector('.dcp-model-entry [role="alert"]')?.textContent ?? "", /models.dev 拉取失败: .*offline/);
   assert.deepEqual(fake.view.user.providers["team-gateway"].models, [{ id: "deepseek-chat", name: "DeepSeek Chat" }]);
+});
+
+test("catalog model manual import writes an override and restore inheritance removes it", async (t) => {
+  let fetchCount = 0;
+  const { container, fake } = await mount(t, (host) => {
+    host.view.user.providers.deepseek = {};
+    host.view.value.providers.deepseek = {};
+    host.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
+      { id: "deepseek-v4.1-flash", name: "Installed", contextWindow: 128000, maxTokens: 8192 }
+    ] });
+    host.fetchModelsDev = async () => { fetchCount++; return { ok: true, json: async () => ({
+      "deepseek/deepseek-v4.1-flash": {
+        name: "DeepSeek V4.1 Flash", limit: { context: 1000000, output: 384000 },
+        modalities: { input: ["text", "image"] }, reasoning: true
+      }
+    }) }; };
+  });
+  await click(button(container, "编辑"));
+  await settle();
+  assert.equal(fetchCount, 0, "automatic catalog discovery cannot fetch models.dev");
+  await click(button(container, "展开模型 deepseek-v4.1-flash"));
+  await click(button(container, "从 models.dev 拉取"));
+  await settle();
+  assert.equal(fetchCount, 1);
+  assert.deepEqual(fake.mutations.at(-1), [{
+    op: "set", path: ["providers", "deepseek", "modelOverrides", "deepseek-v4.1-flash"],
+    value: { name: "DeepSeek V4.1 Flash", contextWindow: 1000000, maxTokens: 384000, input: ["text", "image"] }
+  }]);
+  assert.equal(fake.view.user.providers.deepseek.models, undefined);
+  await click(button(container, "恢复继承"));
+  await settle();
+  assert.equal(fake.view.user.providers.deepseek.modelOverrides?.["deepseek-v4.1-flash"], undefined);
+});
+
+test("unsaved model or JSON drafts block an immediate models.dev import", async (t) => {
+  let fetchCount = 0;
+  const { container } = await mount(t, (host) => {
+    host.fetchModelsDev = async () => { fetchCount++; return { ok: true, json: async () => ({}) }; };
+  });
+  await createProvider(container);
+  await click(button(container, "展开模型 deepseek-chat"));
+  await input(container.querySelector('[aria-label="模型名称 deepseek-chat"]'), "My Model");
+  assert.equal(button(container, "从 models.dev 拉取").disabled, true);
+  await click(button(container, "保存模型"));
+  await settle();
+  assert.equal(button(container, "从 models.dev 拉取").disabled, false);
+  await input(container.querySelector('[aria-label="当前模型 JSON"]'), '{"id":"deepseek-chat","name":"Pending"}');
+  assert.equal(button(container, "从 models.dev 拉取").disabled, true);
+  await click(button(container, "重新加载"));
+  assert.equal(button(container, "从 models.dev 拉取").disabled, false);
+  assert.equal(fetchCount, 0);
 });
 
 test("a newly saved provider turns green after its credential is stored without a model edit", async (t) => {

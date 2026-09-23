@@ -59,7 +59,7 @@ dsh plugin --profile web add "$PWD"
 2. Select **Add model provider**.
 3. Choose a catalog provider, or choose **Custom model API** and enter a provider id, endpoint, and protocol.
 4. Enter the API key when the provider requires one, then fetch the available models.
-5. Save the provider and expand a model to edit its common fields or model-scoped JSON.
+5. Save the provider and expand a model to edit its fields or JSON, or select **Fetch from models.dev** to import model metadata.
 
 Custom providers must use an explicit protocol. **Inherit catalog** is available only for installed catalog providers.
 
@@ -70,13 +70,14 @@ Custom providers must use an explicit protocol. **Inherit catalog** is available
 - Add installed catalog providers or define custom routes with an id, display name, endpoint, and protocol.
 - Edit display name, endpoint, and protocol for writable provider fields.
 - Remove user-created providers. Providers inherited from the profile composition cannot be removed from this page.
-- Fetch and filter models using the adapter-owned `remote.llm` service.
-- For recognizable official model families, missing discovery fields are filled from models.dev only after the installed pi-ai catalog and provider discovery: original model id first, then its recognized official provider (for example `deepseek/…` or `openai/…`), then the first remaining bare-id match. The public `models.json` snapshot is cached in memory for six hours; a failed refresh keeps the previous snapshot and shows a warning. Only name, context window, output limit, and supported text/image inputs are imported; reasoning wire settings and `compat` are never guessed.
-- Existing user model fields remain authoritative when fetching again, and models omitted by a later provider listing are retained. For explicit custom model lists, supplemented values are saved with the preserved list; installed-catalog models still use catalog defaults and model-scoped overrides.
+- Fetch and filter models using the adapter-owned `remote.llm` service. Recognizable official model IDs use installed pi-ai catalog metadata ahead of the provider response.
+- Refresh model lists while retaining user-configured fields and models absent from the latest provider listing.
 
 ### Model management
 
 - Add and remove models in an explicit user-owned `models` list.
+- Use **Fetch from models.dev** between **Restore inherited** and **Save model** to import a model's name, context window, output limit, and supported text/image inputs as user settings. Imported values can replace those fields in the current model; reasoning request values, `compat`, and other JSON fields are unaffected.
+- Match the original full model ID first, then its recognizable official provider (such as `deepseek/…` or `openai/…`), then the first matching bare ID. A six-hour Web-memory cache serves repeated imports; a failed refresh leaves the model configuration unchanged.
 - Customize installed catalog models through `modelOverrides.<model-id>` without copying the entire catalog.
 - Edit model name, context window, output limit, input types, and reasoning capability.
 - Use capacity values such as `256K` and `1M`.
@@ -112,16 +113,15 @@ preview_home="$(mktemp -d "${TMPDIR:-/tmp}/dsh-custom-provider.XXXXXX")"
 DSH_HOME="$preview_home" dsh --profile web --patch "$PWD/test/local.patch.yml" --no-open --port 0
 ```
 
-`lib/client.js` is generated from `lib/client.source.js` and `lib/config.js`, then committed because dsh loads it directly.
+`lib/client.js` is generated from `lib/client.source.js`, `lib/config.js`, and `lib/modelsdev.js`, then committed because dsh loads it directly.
 
 ## Scope and limitations
 
 - Only the built-in `llm-pi-ai` adapter is managed here. Other dsh adapters keep their own settings pages.
-- The official Models page remains unchanged; this page may expose overlapping provider controls by design.
-- Real-host verification still depends on the dsh version, enabled profile plugins, and the running Web Settings surface.
+- This page is separate from the official Models page and includes some overlapping provider controls.
 
 ## Attribution and license
 
-This project is forked from [Luck9Star/dsh-gateway-provider](https://github.com/Luck9Star/dsh-gateway-provider). The former gateway implementation and protocol bridge were removed; the original MIT license and copyright attribution remain in [LICENSE](LICENSE).
+This project is a fork of [Luck9Star/dsh-gateway-provider](https://github.com/Luck9Star/dsh-gateway-provider). The MIT license and copyright attribution are in [LICENSE](LICENSE).
 
 The project is released under the [MIT License](LICENSE).

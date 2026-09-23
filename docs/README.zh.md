@@ -59,7 +59,7 @@ dsh plugin --profile web add "$PWD"
 2. 点击「添加模型供应商」。
 3. 选择目录提供方，或选择「自定义模型 API」，填写提供方 ID、地址和协议。
 4. 如果提供方需要 API Key，先填写密钥，再获取可用模型。
-5. 保存提供方，展开模型后编辑常用字段或当前模型的 JSON。
+5. 保存提供方，展开模型编辑字段或 JSON，也可以点击「从 models.dev 拉取」导入模型信息。
 
 自定义提供方必须明确选择协议。「继承目录」仅适用于已安装的目录提供方。
 
@@ -70,13 +70,14 @@ dsh plugin --profile web add "$PWD"
 - 添加已安装的目录提供方，或创建带有 ID、显示名称、地址和协议的自定义路由。
 - 编辑可写提供方的显示名称、地址和协议。
 - 删除用户创建的提供方；profile composition 继承的提供方不能在本页删除。
-- 使用适配器提供的 `remote.llm` 服务获取和筛选模型。
-- 对可识别官方提供方的模型，先查询 pi-ai 已安装目录；字段仍有缺失时保留提供方发现结果，再从 models.dev 补全：先按原始完整模型 ID 匹配，再按已识别的官方提供方（例如 `deepseek/…`、`openai/…`）匹配，仍未命中则取第一个同裸 ID 的条目。公开的 `models.json` 快照在内存中缓存六小时；刷新失败沿用旧快照并显示提示。只补名称、上下文窗口、输出上限及支持的文字/图片输入，不猜测推理请求值和 `compat`。
-- 重新获取时保留已有的用户模型字段；本次提供方列表未返回的已有模型也不会被删除。自定义显式模型列表会连同补全值一并保存，并保留原列表其余数据；目录模型仍使用目录默认值及单模型覆盖。
+- 通过适配器的 `remote.llm` 服务获取和筛选模型。可识别的官方模型优先采用 pi-ai 已安装目录的信息，其余字段取自提供方返回值。
+- 重新获取模型时，以已有用户配置为准，并保留本次提供方列表未返回的模型。
 
 ### 模型管理
 
 - 在用户显式维护的 `models` 列表中添加和删除模型。
+- 「从 models.dev 拉取」，将名称、上下文窗口、输出上限及支持的文字／图片输入导入为当前模型的用户配置。导入值可覆盖这些字段的原值；推理请求值、`compat` 和其他 JSON 字段不受影响。
+- 按原始完整模型 ID、可识别的官方提供方键（如 `deepseek/…` 或 `openai/…`）、首个同裸 ID 条目的顺序匹配。Web 内存缓存有效期为六小时；缓存过期且刷新失败时，模型配置不变。
 - 通过 `modelOverrides.<模型 ID>` 覆盖已安装目录模型，不复制整份目录。
 - 编辑模型名称、上下文窗口、输出上限、输入类型和推理能力。
 - 上下文窗口和输出上限支持 `256K`、`1M` 等容量写法。
@@ -112,16 +113,15 @@ preview_home="$(mktemp -d "${TMPDIR:-/tmp}/dsh-custom-provider.XXXXXX")"
 DSH_HOME="$preview_home" dsh --profile web --patch "$PWD/test/local.patch.yml" --no-open --port 0
 ```
 
-`lib/client.js` 由 `lib/client.source.js` 和 `lib/config.js` 生成并提交，因为 dsh 会直接加载它。
+`lib/client.js` 由 `lib/client.source.js`、`lib/config.js` 和 `lib/modelsdev.js` 生成并提交，因为 dsh 会直接加载它。
 
 ## 范围与限制
 
-- 本项目只管理内置 `llm-pi-ai` 适配器，其他 dsh 适配器继续使用各自的设置页面。
-- 官方「模型」页面保持不变；本页面与其出现部分重叠的提供方控制项是有意设计。
-- 真实宿主验证仍取决于 dsh 版本、启用的 profile 插件和正在运行的 Web Settings。
+- 本项目面向内置 `llm-pi-ai` 适配器；其他 dsh 适配器由各自的设置页面管理。
+- 本页面独立于官方「模型」页面，两者有部分重叠的提供方控制项。
 
 ## 致谢与许可
 
-本项目 fork 自 [Luck9Star/dsh-gateway-provider](https://github.com/Luck9Star/dsh-gateway-provider)。原网关实现和协议桥接已移除，原 MIT 许可证与版权归属保留在 [LICENSE](../LICENSE) 中。
+本项目 fork 自 [Luck9Star/dsh-gateway-provider](https://github.com/Luck9Star/dsh-gateway-provider)。MIT 许可证与版权归属见 [LICENSE](../LICENSE)。
 
 本项目使用 [MIT License](../LICENSE) 发布。
