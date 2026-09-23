@@ -43,15 +43,21 @@ Install the published plugin into the `web` profile:
 dsh plugin --profile web add dsh-custom-provider
 ```
 
-Restart dsh, then open Web Settings and select **Model configuration** below **Models**.
+To install directly from the GitHub repository instead:
 
-The bundled patch registers the plugin once. Do not add another `dsh-custom-provider` entry with the same id.
+```sh
+dsh plugin --profile web add github:xgblack/dsh-custom-provider
+```
 
-To install a local checkout instead, point the same command at the repository root:
+To install a local checkout, run this from the repository root:
 
 ```sh
 dsh plugin --profile web add "$PWD"
 ```
+
+Restart dsh, then open Web Settings and select **Model configuration** below **Models**.
+
+The bundled patch registers the plugin once. Do not add another `dsh-custom-provider` entry with the same id.
 
 ## Quick start
 

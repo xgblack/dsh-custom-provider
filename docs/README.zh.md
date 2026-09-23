@@ -43,15 +43,21 @@ dsh 内置的 `llm-pi-ai` 适配器负责提供方 schema 和运行时行为，�
 dsh plugin --profile web add dsh-custom-provider
 ```
 
-重启 dsh，然后在 Web Settings 的「模型」下面进入「模型配置」。
+也可以直接从 GitHub 仓库安装：
 
-bundle patch 已经注册一次插件，不要再添加相同 id 的 `dsh-custom-provider` 条目。
+```sh
+dsh plugin --profile web add github:xgblack/dsh-custom-provider
+```
 
-如需安装本地源码目录，把同一条命令指向仓库根目录即可：
+如需安装本地源码目录，在仓库根目录执行：
 
 ```sh
 dsh plugin --profile web add "$PWD"
 ```
+
+重启 dsh，然后在 Web Settings 的「模型」下面进入「模型配置」。
+
+bundle patch 已经注册一次插件，不要再添加相同 id 的 `dsh-custom-provider` 条目。
 
 ## 快速开始
 
