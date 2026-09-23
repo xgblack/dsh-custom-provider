@@ -18,6 +18,16 @@ dsh's built-in `llm-pi-ai` adapter owns the provider schema and runtime behavior
 - Keep API keys in dsh's credential service instead of settings JSON.
 - Preserve dsh's revision and schema validation behavior for concurrent or invalid writes.
 
+## Screenshots
+
+Set up provider routes, endpoints, and credentials in one page:
+
+![Provider configuration with a custom API route](docs/images/screen01.webp)
+
+Edit one model's capabilities and JSON without replacing its siblings:
+
+![Model settings editor](docs/images/screen02.webp)
+
 ## Requirements
 
 - A dsh installation with the **Web Settings** surface enabled.

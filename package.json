@@ -17,7 +17,7 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
-  "files": ["index.js", "lib/client.js", "cordis.patch.yml", "docs"],
+  "files": ["index.js", "lib/client.js", "cordis.patch.yml", "docs", "!docs/images"],
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "prepack": "npm run build",

@@ -18,6 +18,16 @@ dsh 内置的 `llm-pi-ai` 适配器负责提供方 schema 和运行时行为，�
 - 通过 dsh 凭据服务保存 API Key，不把密钥写入设置 JSON。
 - 保留 dsh 的 revision 和 schema 校验行为，正确处理并发或非法写入。
 
+## 界面截图
+
+在同一页面配置提供方路由、接口地址和凭据：
+
+![配置自定义 API 提供方](images/screen01.webp)
+
+只调整当前模型的能力与 JSON，不替换同一提供方下的其他模型：
+
+![模型设置编辑器](images/screen02.webp)
+
 ## 使用要求
 
 - 已启用 **Web Settings** 的 dsh 安装。
