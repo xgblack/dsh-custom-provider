@@ -42,7 +42,12 @@ npm version patch        # 或 minor / major，产生提交与 v* 标签
 git push --follow-tags
 ```
 
-标签推送触发 `.github/workflows/npm-publish.yml`：先 `npm test`，再 `npm publish`，走 OIDC，不需要 token 或 OTP。
+标签推送触发 `.github/workflows/npm-publish.yml`，两件事依次完成：
+
+1. `publish` 任务：`npm test` → `npm publish`，走 OIDC，不需要 token 或 OTP。
+2. `release` 任务（`needs: publish`，只在 npm 发布成功后执行）：用 `gh release create "$GITHUB_REF_NAME" --generate-notes` 为同一个标签创建 GitHub Release，标题即标签名，说明由 GitHub 按“上一个标签到本次标签”的提交自动生成。
+
+Release 由工作流自带的 `GITHUB_TOKEN` 创建，因此 workflow 需要 `contents: write`；若仓库把 Actions 的默认 token 权限收紧到只读，需在仓库 Settings → Actions → General 里放行，或改用个人 token。同版本号重复发版时 `npm publish` 会先失败，`release` 任务不会执行，不会产生孤儿 Release。
 
 ## 常见报错
 

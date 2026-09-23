@@ -1,6 +1,9 @@
 # npm Trusted Publishing (OIDC) — no npm token, no OTP.
 # Register this workflow on npmjs.com → package → Settings → Trusted Publisher
 # with: user xgblack, repo dsh-custom-provider, filename npm-publish.yml.
+#
+# Pushing a v* tag does both: publish to npm, then create the matching GitHub
+# Release (notes generated from the commits since the previous tag).
 name: Publish to npm
 
 on:
@@ -10,7 +13,7 @@ on:
 
 permissions:
   id-token: write # OIDC token for npm trusted publishing
-  contents: read
+  contents: write # create the GitHub Release for the pushed tag
 
 jobs:
   publish:
@@ -30,3 +33,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: npm test
       - run: npm publish
+
+  release:
+    needs: publish # only after the package really landed on npm
+    runs-on: ubuntu-latest
+    steps:
+      # gh is preinstalled on ubuntu-latest; the workflow token creates the release.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --generate-notes
