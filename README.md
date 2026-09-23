@@ -86,6 +86,7 @@ Custom providers must use an explicit protocol. **Inherit catalog** is available
 - Match the original full model ID first, then its recognizable official provider (such as `deepseek/…` or `openai/…`), then the first matching bare ID. A six-hour Web-memory cache serves repeated imports; a failed refresh leaves the model configuration unchanged.
 - Customize installed catalog models through `modelOverrides.<model-id>` without copying the entire catalog.
 - Edit model name, context window, output limit, input types, and reasoning capability.
+- Reasoning levels come from the host schema, so the form offers exactly the levels `llm-pi-ai` accepts (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) and writes only the ticked ones. A level's request value is the wire spelling its gateway expects, and a blank `off` sends no reasoning parameter at all. A draft no adapter could serve — no level at all, a thinking level without a value, or `off` alone — is refused before the write, and a level key the host does not know is reported instead of rendered as a row, then removed by the next save.
 - Use capacity values such as `256K` and `1M`.
 - Open **Edit JSON** for the selected model only. The model id is fixed and sibling models remain untouched.
 - Keep composition-inherited model lists read-only because editing one row would otherwise replace the complete inherited list.

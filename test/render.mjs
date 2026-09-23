@@ -12,21 +12,50 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = await import("react-dom/client");
 const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
 
+const HOST_REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
 function host() {
   let view = { ns: "llm-pi-ai", schema: {}, revision: 1, base: {}, user: { providers: {} }, value: { providers: {} } };
   const mutations = [];
   const storedKeys = new Set();
+  const levels = [...HOST_REASONING_LEVELS];
   let refusal;
   const fakeModelsDev = async () => ({ ok: true, json: async () => ({}) });
   return {
     mutations,
+    levels,
     get view() { return view; },
     reject(message) { refusal = message; },
     fetchModelsDev: fakeModelsDev,
     schema: {
       rehydrate: (value) => value,
-      validate: () => undefined,
-      nodeAtPath: () => ({ type: "union", list: [{ value: "openai-completions" }, { value: "openai-responses" }] })
+      // Stands in for the host schema: the reasoningEfforts key vocabulary is the level list,
+      // so a draft carrying any other key is rejected exactly as the real schema rejects it.
+      validate: (_root, draft) => {
+        for (const [route, profile] of Object.entries(draft?.providers ?? {})) {
+          const entries = [...(profile?.models ?? []), ...Object.values(profile?.modelOverrides ?? {})];
+          for (const [index, entry] of entries.entries()) {
+            const efforts = entry?.reasoningEfforts;
+            if (efforts === undefined || efforts === false) continue;
+            const path = `$.providers.${route}.models[${index}].reasoningEfforts`;
+            if (typeof efforts !== "object" || efforts === null || Array.isArray(efforts)) {
+              return `${path} expected false | dict but got ${JSON.stringify(efforts)}`;
+            }
+            for (const [level, wire] of Object.entries(efforts)) {
+              if (!levels.includes(level)) return `${path} unexpected key ${JSON.stringify(level)}`;
+              if (wire !== null && typeof wire !== "string") return `${path}.${level} expected string | null`;
+            }
+          }
+        }
+        return undefined;
+      },
+      nodeAtPath: (_root, path) => path.at(-1) === "reasoningEfforts"
+        ? { type: "union", list: [
+          { type: "const", value: false },
+          { type: "dict", inner: { type: "union", list: [{ type: "string" }, { type: "const", value: null }] },
+            sKey: { type: "union", list: levels.map((value) => ({ type: "const", value })) } }
+        ] }
+        : { type: "union", list: [{ value: "openai-completions" }, { value: "openai-responses" }] }
     },
     services: {
       remote: { $on: () => () => {} },
@@ -101,6 +130,30 @@ async function input(el, value) {
 }
 async function settle() {
   for (let at = 0; at < 10; at += 1) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+}
+function modelEntry(container, modelId) {
+  const row = [...container.querySelectorAll(".dcp-model-entry")]
+    .find((entry) => entry.querySelector(`[aria-label="模型 ID ${modelId}"]`));
+  assert.ok(row, `model row not found: ${modelId}`);
+  return row;
+}
+async function openReasoning(container, modelId) {
+  await click(button(container, `展开模型 ${modelId}`));
+  const row = modelEntry(container, modelId);
+  const advanced = row.querySelector(".dcp-model-advanced");
+  const reasoningSwitch = advanced.querySelectorAll('input[role="switch"]')[1];
+  assert.ok(reasoningSwitch, "the reasoning switch must exist");
+  if (!reasoningSwitch.checked) await click(reasoningSwitch);
+  return row;
+}
+function levelRow(row, name) {
+  const found = [...row.querySelectorAll(".dcp-level-row")]
+    .find((entry) => entry.querySelector(".dcp-level-name span").textContent === name);
+  assert.ok(found, `reasoning level row not found: ${name}`);
+  return found;
+}
+function reasoningFailure(row) {
+  return row.querySelector(".dcp-reasoning-levels .dcp-error")?.textContent ?? "";
 }
 async function createProvider(container, key = "", expectFailure = false) {
   await click(button(container, "添加模型供应商"));
@@ -406,7 +459,15 @@ test("creating a provider renders its card and working model search", async (t) 
   await click(reasoningSwitch);
   const reasoningCustom = [...modelAdvanced.querySelectorAll('input[type="radio"]')].find((input) => input.name.endsWith("-reasoning") && input.value === "custom");
   await click(reasoningCustom);
-  assert.equal(modelAdvanced.querySelectorAll(".dcp-level-row").length, 4, "custom reasoning starts with off/low/high/max");
+  const levelRows = [...modelAdvanced.querySelectorAll(".dcp-level-row")];
+  assert.deepEqual(levelRows.map((row) => row.querySelector(".dcp-level-name span").textContent),
+    HOST_REASONING_LEVELS, "every host reasoning level gets one row, in the host's order");
+  assert.deepEqual(levelRows.filter((row) => row.querySelector("input.dcp-level-check").checked)
+    .map((row) => row.querySelector(".dcp-level-name span").textContent),
+    ["off", "low", "high", "max"], "custom reasoning starts with off/low/high/max");
+  assert.equal(levelRows.some((row) => row.querySelector("button")), false, "levels are fixed rows, not add/remove ones");
+  assert.equal(levelRows.find((row) => row.querySelector(".dcp-level-name span").textContent === "medium")
+    .querySelector(".dcp-input").disabled, true, "an unchecked level takes no request value");
   await click(modelAdvanced.parentElement.querySelector("summary"));
   const contextLabel = [...modelAdvanced.querySelectorAll("label")].find((label) => label.textContent === "上下文窗口");
   await input(document.getElementById(contextLabel.htmlFor), "1M");
@@ -427,4 +488,84 @@ test("creating a provider renders its card and working model search", async (t) 
   await click(button(container, "收起"));
   await click(button(container, "编辑"));
   assert.match(container.textContent, /暂无模型/);
+});
+
+test("the reasoning level list comes from the host schema", async (t) => {
+  const { container } = await mount(t, (host) => { host.levels.splice(0, host.levels.length, "off", "turbo"); });
+  await createProvider(container);
+  const row = await openReasoning(container, "deepseek-chat");
+  assert.deepEqual([...row.querySelectorAll(".dcp-level-name span")].map((el) => el.textContent), ["off", "turbo"],
+    "the form renders the host's level vocabulary, not a built-in copy");
+});
+
+test("a reasoning level without a wire value blocks the save", async (t) => {
+  const { container, fake } = await mount(t);
+  await createProvider(container);
+  const row = await openReasoning(container, "deepseek-chat");
+  await click(levelRow(row, "medium").querySelector("input.dcp-level-check"));
+  assert.match(reasoningFailure(row), /medium/);
+  assert.equal(button(row, "保存模型").disabled, true, "a draft the adapter cannot serve is not written");
+  assert.equal(fake.view.user.providers["team-gateway"].models[0].reasoningEfforts, undefined, "nothing was written");
+  await input(levelRow(row, "medium").querySelector(".dcp-input"), "medium");
+  assert.equal(reasoningFailure(row), "", "filling the request value clears the failure");
+  assert.equal(button(row, "保存模型").disabled, false);
+  await click(button(row, "保存模型"));
+  await settle();
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models[0].reasoningEfforts,
+    { off: null, low: "low", medium: "medium", high: "high", max: "max" });
+});
+
+test("declaring only off blocks the save", async (t) => {
+  const { container, fake } = await mount(t);
+  await createProvider(container);
+  const row = await openReasoning(container, "deepseek-chat");
+  for (const name of ["low", "high", "max"]) await click(levelRow(row, name).querySelector("input.dcp-level-check"));
+  assert.match(reasoningFailure(row), /只声明 off/);
+  assert.equal(button(row, "保存模型").disabled, true);
+  const unsupported = [...row.querySelectorAll('input[type="radio"]')].find((el) => el.value === "disabled");
+  await click(unsupported);
+  assert.equal(reasoningFailure(row), "");
+  assert.equal(button(row, "保存模型").disabled, false);
+  await click(button(row, "保存模型"));
+  await settle();
+  assert.equal(fake.view.user.providers["team-gateway"].models[0].reasoningEfforts, false);
+});
+
+test("levels the host does not know are reported and dropped by the next save", async (t) => {
+  const profile = {
+    api: "openai-completions", baseURL: "https://example.invalid/v1",
+    models: [{ id: "gpt-5.6-sol", reasoningEfforts: { off: null, low: "low", ultra: "ultra" } }]
+  };
+  const { container, fake } = await mount(t, (host) => {
+    host.view.user.providers["team-gateway"] = structuredClone(profile);
+    host.view.value.providers["team-gateway"] = structuredClone(profile);
+  });
+  await click(button(container, "编辑"));
+  await settle();
+  await click(button(container, "展开模型 gpt-5.6-sol"));
+  const row = modelEntry(container, "gpt-5.6-sol");
+  assert.match(row.querySelector(".dcp-notice").textContent, /ultra/, "an unknown level is surfaced, not silently rendered as a row");
+  assert.equal([...row.querySelectorAll(".dcp-level-name span")].some((el) => el.textContent === "ultra"), false);
+  await input(row.querySelector('[aria-label="模型名称 gpt-5.6-sol"]'), "Sol");
+  await click(button(row, "保存模型"));
+  await settle();
+  assert.equal(row.querySelector('[role="alert"]'), null, `unexpected write failure: ${row.querySelector('[role="alert"]')?.textContent}`);
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models[0].reasoningEfforts, { off: null, low: "low" });
+});
+
+test("the JSON editor still defers to the host schema for unknown levels", async (t) => {
+  const { container, fake } = await mount(t);
+  await createProvider(container);
+  await click(button(container, "展开模型 deepseek-chat"));
+  const row = modelEntry(container, "deepseek-chat");
+  await click(row.querySelector("summary"));
+  const textarea = row.querySelector("textarea");
+  const draft = JSON.parse(textarea.value);
+  draft.reasoningEfforts = { off: null, ultra: "ultra" };
+  await input(textarea, JSON.stringify(draft, null, 2));
+  const writes = fake.mutations.length;
+  await click(button(row, "保存 JSON"));
+  await settle();
+  assert.equal(fake.mutations.length, writes, "an unknown level never reaches the settings store");
+  assert.match(row.querySelector('[role="alert"]').textContent, /unexpected key "ultra"/, "the host schema, not the form, is what refuses this");
 });
