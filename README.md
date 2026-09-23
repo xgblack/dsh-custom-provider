@@ -22,39 +22,26 @@ dsh's built-in `llm-pi-ai` adapter owns the provider schema and runtime behavior
 
 - A dsh installation with the **Web Settings** surface enabled.
 - The built-in `llm-pi-ai` plugin enabled in the same dsh profile.
-- Node.js and npm for local development or a source checkout.
 
 This package does not provide an LLM adapter, gateway route, or credential backend. It only manages the existing `llm-pi-ai` settings and remotes.
 
 ## Installation
 
-### Install from a checkout
+Install the published plugin into the `web` profile:
 
-From the repository root, install the plugin into the `web` profile:
+```sh
+dsh plugin --profile web add dsh-custom-provider
+```
+
+Restart dsh, then open Web Settings and select **Model configuration** below **Models**.
+
+The bundled patch registers the plugin once. Do not add another `dsh-custom-provider` entry with the same id.
+
+To install a local checkout instead, point the same command at the repository root:
 
 ```sh
 dsh plugin --profile web add "$PWD"
 ```
-
-The bundled patch registers the plugin once. Do not add another `dsh-custom-provider` entry with the same id.
-
-### Preview safely from source
-
-Use an isolated `DSH_HOME` when previewing the plugin. This prevents test edits from changing your normal dsh providers or credentials:
-
-```sh
-npm run build
-
-preview_home="$(mktemp -d "${TMPDIR:-/tmp}/dsh-custom-provider.XXXXXX")"
-DSH_HOME="$preview_home" dsh --profile web \
-  --patch "$PWD/test/local.patch.yml" \
-  --no-open \
-  --port 0
-```
-
-dsh prints a local URL containing an access token. Open that URL and configure test providers in the temporary profile. A `--patch` run without an isolated `DSH_HOME` does not install the plugin, but saving from the page can still modify the profile selected by dsh.
-
-When a release is published, use `dsh-custom-provider` as the package target supported by your dsh plugin manager instead of a local path.
 
 ## Quick start
 
@@ -97,18 +84,23 @@ The page follows the host `llm-pi-ai` schema and storage boundaries:
 
 ## Development
 
-Install the development dependencies, then run the focused checks:
+Node.js and npm are required for local development.
 
 ```sh
-npm install
-npm run build
-npm test
-npm pack --dry-run
+npm install         # development dependencies
+npm run build       # regenerate lib/client.js
+npm test            # build + focused checks
+npm pack --dry-run  # inspect the published file set
 ```
 
-`lib/client.js` is generated from `lib/client.source.js` and `lib/config.js`, then committed because dsh loads `exports["./client"]` directly. Run `npm run build` after changing either source file.
+Preview against an isolated profile, so test edits stay out of your normal dsh configuration:
 
-The test suite covers provider/model operation scope, sibling preservation, catalog overrides, validation and rejection paths, revision conflicts, and independent settings-section registration. `npm pack --dry-run` verifies the published file set.
+```sh
+preview_home="$(mktemp -d "${TMPDIR:-/tmp}/dsh-custom-provider.XXXXXX")"
+DSH_HOME="$preview_home" dsh --profile web --patch "$PWD/test/local.patch.yml" --no-open --port 0
+```
+
+`lib/client.js` is generated from `lib/client.source.js` and `lib/config.js`, then committed because dsh loads it directly.
 
 ## Scope and limitations
 

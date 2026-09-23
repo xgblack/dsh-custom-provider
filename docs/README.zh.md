@@ -22,39 +22,26 @@ dsh 内置的 `llm-pi-ai` 适配器负责提供方 schema 和运行时行为，�
 
 - 已启用 **Web Settings** 的 dsh 安装。
 - 与 Web Settings 使用同一个 dsh profile 的内置 `llm-pi-ai` 插件。
-- 本地开发或从源码预览需要 Node.js 和 npm。
 
 本项目不提供 LLM 适配器、网关路由或凭据后端，只管理现有的 `llm-pi-ai` 设置和远程服务。
 
 ## 安装
 
-### 从源码目录安装
+将已发布的插件安装到 `web` profile：
 
-在仓库根目录执行，将插件安装到 `web` profile：
+```sh
+dsh plugin --profile web add dsh-custom-provider
+```
+
+重启 dsh，然后在 Web Settings 的「模型」下面进入「模型配置」。
+
+bundle patch 已经注册一次插件，不要再添加相同 id 的 `dsh-custom-provider` 条目。
+
+如需安装本地源码目录，把同一条命令指向仓库根目录即可：
 
 ```sh
 dsh plugin --profile web add "$PWD"
 ```
-
-bundle patch 已经注册一次插件，不要再添加相同 id 的 `dsh-custom-provider` 条目。
-
-### 安全地从源码预览
-
-预览时使用独立的 `DSH_HOME`，避免测试修改日常 dsh 的提供方和凭据：
-
-```sh
-npm run build
-
-preview_home="$(mktemp -d "${TMPDIR:-/tmp}/dsh-custom-provider.XXXXXX")"
-DSH_HOME="$preview_home" dsh --profile web \
-  --patch "$PWD/test/local.patch.yml" \
-  --no-open \
-  --port 0
-```
-
-dsh 会输出包含访问 token 的本地 URL。打开该地址后，在临时 profile 中配置测试提供方。只使用 `--patch` 而不设置独立 `DSH_HOME` 不会安装插件，但页面保存操作仍可能修改 dsh 当前选择的 profile。
-
-发布版本后，可将 `dsh-custom-provider` 作为 dsh 插件管理器支持的包目标使用，不必再指向本地目录。
 
 ## 快速开始
 
@@ -97,18 +84,23 @@ dsh 会输出包含访问 token 的本地 URL。打开该地址后，在临时 p
 
 ## 开发与验证
 
-安装开发依赖后运行以下检查：
+本地开发需要 Node.js 和 npm。
 
 ```sh
-npm install
-npm run build
-npm test
-npm pack --dry-run
+npm install         # 安装开发依赖
+npm run build       # 重新生成 lib/client.js
+npm test            # 构建 + 重点检查
+npm pack --dry-run  # 检查发布文件集合
 ```
 
-`lib/client.js` 由 `lib/client.source.js` 和 `lib/config.js` 生成并提交，因为 dsh 会直接加载 `exports["./client"]`。修改任一源文件后都要运行 `npm run build`。
+在独立 profile 中预览，避免测试改动影响日常 dsh 配置：
 
-测试覆盖提供方和模型操作范围、同级数据保留、目录覆盖、校验和拒绝路径、revision 冲突以及独立设置区注册；`npm pack --dry-run` 用于检查发布文件集合。
+```sh
+preview_home="$(mktemp -d "${TMPDIR:-/tmp}/dsh-custom-provider.XXXXXX")"
+DSH_HOME="$preview_home" dsh --profile web --patch "$PWD/test/local.patch.yml" --no-open --port 0
+```
+
+`lib/client.js` 由 `lib/client.source.js` 和 `lib/config.js` 生成并提交，因为 dsh 会直接加载它。
 
 ## 范围与限制
 

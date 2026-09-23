@@ -17,10 +17,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      # pnpm installs the locked devDependencies that `npm test` needs (jsdom, react).
+      # Keep it before actions/setup-node so that a future `cache: pnpm` still works.
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '10'
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false # never cache in release builds
+      - run: pnpm install --frozen-lockfile
       - run: npm test
       - run: npm publish
