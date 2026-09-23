@@ -138,7 +138,7 @@ test("custom provider discovery can be edited before creation", async (t) => {
   assert.equal(fake.view.user.providers["draft-gateway"], undefined);
 });
 
-test("models.dev is only fetched by the per-model button; manual import saves supported fields as user values", async (t) => {
+test("models.dev fills the model draft; Save model is the only commit action", async (t) => {
   let fetchCount = 0;
   const { container, fake } = await mount(t, (host) => {
     host.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
@@ -160,27 +160,45 @@ test("models.dev is only fetched by the per-model button; manual import saves su
   const actions = container.querySelector(".dcp-model-entry .dcp-actions");
   assert.deepEqual([...actions.querySelectorAll("button")].map((el) => el.textContent.trim()),
     ["恢复继承", "从 models.dev 拉取", "保存模型"]);
+  const writesBeforeImport = fake.mutations.length;
   await click(button(actions, "从 models.dev 拉取"));
   await settle();
   assert.equal(fetchCount, 1);
-  assert.match(container.textContent, /已从 models.dev 保存: deepseek\/deepseek-v4\.1-flash/);
+  assert.equal(fake.mutations.length, writesBeforeImport, "fetching must not write settings");
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models, [
+    { id: "deepseek-v4.1-flash" }, { id: "gpt-6-sol", contextWindow: 900000 }
+  ]);
+  assert.doesNotMatch(container.textContent, /已从 models.dev 保存/);
+  assert.match(container.textContent, /已填入 models.dev 数据，点击「保存模型」提交/);
   const deepseekRow = [...container.querySelectorAll(".dcp-model-entry")].find((entry) => entry.querySelector('[aria-label="模型 ID deepseek-v4.1-flash"]'));
   assert.equal(deepseekRow.querySelector('[aria-label="模型名称 deepseek-v4.1-flash"]').value, "DeepSeek V4.1 Flash");
   const contextLabel = [...deepseekRow.querySelectorAll(".dcp-model-advanced label")].find((label) => label.textContent === "上下文窗口");
-  assert.equal(document.getElementById(contextLabel.htmlFor).value, "1M", "saved import must fill the editable field");
+  assert.equal(document.getElementById(contextLabel.htmlFor).value, "1M", "fetching fills the editable field");
+  assert.equal([...deepseekRow.querySelectorAll('.dcp-choice-group input[type="checkbox"]')].find((input) => input.value === "image").checked, true);
+  assert.equal(button(deepseekRow, "保存模型").disabled, false);
+  await input(deepseekRow.querySelector('[aria-label="模型名称 deepseek-v4.1-flash"]'), "My DeepSeek");
+  await click(button(deepseekRow, "保存模型"));
+  await settle();
+  assert.equal(fake.mutations.length, writesBeforeImport + 1);
+  assert.equal(fake.view.user.providers["team-gateway"].models[0].name, "My DeepSeek", "user edits after fetch are saved");
   await click(button(container, "展开模型 gpt-6-sol"));
   const gptRow = [...container.querySelectorAll(".dcp-model-entry")].find((entry) => entry.querySelector('[aria-label="模型 ID gpt-6-sol"]'));
+  const writesBeforeSecondImport = fake.mutations.length;
   await click(button(gptRow, "从 models.dev 拉取"));
   await settle();
   assert.equal(fetchCount, 1, "a second manual import within six hours reuses the cache");
+  assert.equal(fake.mutations.length, writesBeforeSecondImport);
+  assert.equal(fake.view.user.providers["team-gateway"].models[1].contextWindow, 900000);
+  await click(button(gptRow, "保存模型"));
+  await settle();
   assert.deepEqual(fake.view.user.providers["team-gateway"].models, [
-    { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", contextWindow: 1000000, maxTokens: 384000, input: ["text", "image"] },
+    { id: "deepseek-v4.1-flash", name: "My DeepSeek", contextWindow: 1000000, maxTokens: 384000, input: ["text", "image"] },
     { id: "gpt-6-sol", name: "GPT-6 Sol", contextWindow: 1050000, maxTokens: 128000, input: ["text", "image"] }
   ]);
   await click(button(container.querySelector(".dcp-model-catalog"), "获取可用模型"));
   await settle();
   assert.equal(fetchCount, 1);
-  assert.equal(fake.view.user.providers["team-gateway"].models[1].contextWindow, 1050000, "subsequent provider discovery keeps the imported user value");
+  assert.equal(fake.view.user.providers["team-gateway"].models[1].contextWindow, 1050000, "subsequent provider discovery keeps the saved user value");
 });
 
 test("models.dev failure only affects manual import, leaving provider values untouched", async (t) => {
@@ -197,7 +215,7 @@ test("models.dev failure only affects manual import, leaving provider values unt
   assert.deepEqual(fake.view.user.providers["team-gateway"].models, [{ id: "deepseek-chat", name: "DeepSeek Chat" }]);
 });
 
-test("catalog model manual import writes an override and restore inheritance removes it", async (t) => {
+test("catalog model import fills the draft, then Save model writes only its override", async (t) => {
   let fetchCount = 0;
   const { container, fake } = await mount(t, (host) => {
     host.view.user.providers.deepseek = {};
@@ -216,9 +234,14 @@ test("catalog model manual import writes an override and restore inheritance rem
   await settle();
   assert.equal(fetchCount, 0, "automatic catalog discovery cannot fetch models.dev");
   await click(button(container, "展开模型 deepseek-v4.1-flash"));
+  const writesBeforeImport = fake.mutations.length;
   await click(button(container, "从 models.dev 拉取"));
   await settle();
   assert.equal(fetchCount, 1);
+  assert.equal(fake.mutations.length, writesBeforeImport);
+  assert.equal(fake.view.user.providers.deepseek.modelOverrides, undefined);
+  await click(button(container, "保存模型"));
+  await settle();
   assert.deepEqual(fake.mutations.at(-1), [{
     op: "set", path: ["providers", "deepseek", "modelOverrides", "deepseek-v4.1-flash"],
     value: { name: "DeepSeek V4.1 Flash", contextWindow: 1000000, maxTokens: 384000, input: ["text", "image"] }

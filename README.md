@@ -76,7 +76,7 @@ Custom providers must use an explicit protocol. **Inherit catalog** is available
 ### Model management
 
 - Add and remove models in an explicit user-owned `models` list.
-- Use **Fetch from models.dev** between **Restore inherited** and **Save model** to import a model's name, context window, output limit, and supported text/image inputs as user settings. Imported values can replace those fields in the current model; reasoning request values, `compat`, and other JSON fields are unaffected.
+- Use **Fetch from models.dev** to fill the editable name, context window, output limit, and supported text/image inputs. Review or adjust the fields, then click **Save model** to write them as user settings. Fetching alone does not save. Reasoning request values, `compat`, and other JSON fields are unaffected.
 - Match the original full model ID first, then its recognizable official provider (such as `deepseek/…` or `openai/…`), then the first matching bare ID. A six-hour Web-memory cache serves repeated imports; a failed refresh leaves the model configuration unchanged.
 - Customize installed catalog models through `modelOverrides.<model-id>` without copying the entire catalog.
 - Edit model name, context window, output limit, input types, and reasoning capability.
