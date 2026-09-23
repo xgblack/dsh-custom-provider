@@ -71,6 +71,8 @@ Custom providers must use an explicit protocol. **Inherit catalog** is available
 - Edit display name, endpoint, and protocol for writable provider fields.
 - Remove user-created providers. Providers inherited from the profile composition cannot be removed from this page.
 - Fetch and filter models using the adapter-owned `remote.llm` service.
+- For recognizable official model families, missing discovery fields are filled from models.dev only after the installed pi-ai catalog and provider discovery: original model id first, then its recognized official provider (for example `deepseek/…` or `openai/…`), then the first remaining bare-id match. The public `models.json` snapshot is cached in memory for six hours; a failed refresh keeps the previous snapshot and shows a warning. Only name, context window, output limit, and supported text/image inputs are imported; reasoning wire settings and `compat` are never guessed.
+- Existing user model fields remain authoritative when fetching again, and models omitted by a later provider listing are retained. For explicit custom model lists, supplemented values are saved with the preserved list; installed-catalog models still use catalog defaults and model-scoped overrides.
 
 ### Model management
 

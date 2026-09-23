@@ -17,10 +17,12 @@ function host() {
   const mutations = [];
   const storedKeys = new Set();
   let refusal;
+  const fakeModelsDev = async () => ({ ok: true, json: async () => ({}) });
   return {
     mutations,
     get view() { return view; },
     reject(message) { refusal = message; },
+    fetchModelsDev: fakeModelsDev,
     schema: {
       rehydrate: (value) => value,
       validate: () => undefined,
@@ -65,7 +67,8 @@ async function mount(t, configure = () => {}) {
   let plugin;
   vm.runInNewContext(source, {
     window: { __ModuleLoader__: { load: (entry) => { plugin = entry; } }, confirm: () => true },
-    document, navigator: { language: "zh-CN" }, console, URL
+    document, navigator: { language: "zh-CN" }, console, URL, AbortController, setTimeout, clearTimeout,
+    fetch: (...args) => fake.fetchModelsDev(...args)
   });
   const client = plugin.factory(() => React);
   let entry;
@@ -135,6 +138,41 @@ test("custom provider discovery can be edited before creation", async (t) => {
   assert.equal(fake.view.user.providers["draft-gateway"], undefined);
 });
 
+test("ID-only discovery fills missing model fields before saving, without importing reasoning guesses", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
+      { id: "deepseek-v4.1-flash" }, { id: "gpt-6-sol", contextWindow: 900000 }
+    ] });
+    host.fetchModelsDev = async () => ({ ok: true, json: async () => ({
+      "other/deepseek-v4.1-flash": { limit: { context: 42 } },
+      "deepseek/deepseek-v4.1-flash": { name: "DeepSeek V4.1 Flash", limit: { context: 1000000, output: 384000 }, modalities: { input: ["text", "image"] }, reasoning: true },
+      "other/gpt-6-sol": { limit: { context: 42 } },
+      "openai/gpt-6-sol": { name: "GPT-6 Sol", limit: { context: 1050000, output: 128000 }, modalities: { input: ["text", "image", "pdf"] }, reasoning: true }
+    }) });
+  });
+  await createProvider(container);
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models, [
+    { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", contextWindow: 1000000, maxTokens: 384000, input: ["text", "image"] },
+    { id: "gpt-6-sol", name: "GPT-6 Sol", contextWindow: 900000, maxTokens: 128000, input: ["text", "image"] }
+  ]);
+});
+
+test("models.dev failure warns but does not block saving IDs returned by the provider", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.fetchModelsDev = async () => { throw new Error("offline"); };
+  });
+  await click(button(container, "添加模型供应商"));
+  await click(button(container, "自定义模型 API"));
+  await input(container.querySelector("#dcp-create-route"), "team-gateway");
+  await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
+  await click(button(container, "获取可用模型"));
+  await settle();
+  assert.match(container.querySelector('[role="status"]')?.textContent ?? "", /models.dev 不可用/);
+  await click(button(container, "添加"));
+  await settle();
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models, [{ id: "deepseek-chat", name: "DeepSeek Chat" }]);
+});
+
 test("a newly saved provider turns green after its credential is stored without a model edit", async (t) => {
   let releaseSave;
   const { container } = await mount(t, (fake) => {
@@ -199,6 +237,47 @@ test("a failed key save stays missing until the retry succeeds", async (t) => {
   await settle();
   assert.ok(container.querySelector('[aria-label="已配置 API Key"]'));
   assert.equal(container.querySelector('[aria-label="缺少 API Key"]'), null);
+});
+
+test("refresh keeps explicit user model fields above new provider and models.dev values", async (t) => {
+  let returnedContext = 128000;
+  const { container, fake } = await mount(t, (host) => {
+    host.services["remote.llm"].discoverModels = async (_ns, request) => ({ ok: true, value: request.provider === "deepseek"
+      ? [] : [{ id: "deepseek-chat", name: "Provider", contextWindow: returnedContext, maxTokens: 8192 }] });
+    host.fetchModelsDev = async () => ({ ok: true, json: async () => ({
+      "deepseek/deepseek-chat": { name: "Web", limit: { context: 2000000, output: 16000 }, modalities: { input: ["text"] } }
+    }) });
+  });
+  await createProvider(container);
+  await click(button(container, "展开模型 deepseek-chat"));
+  const field = [...container.querySelectorAll(".dcp-model-advanced label")].find((label) => label.textContent === "上下文窗口");
+  await input(document.getElementById(field.htmlFor), "1M");
+  await click(button(container, "保存模型"));
+  await settle();
+  returnedContext = 256000;
+  await click(button(container.querySelector(".dcp-model-catalog"), "获取可用模型"));
+  await settle();
+  assert.equal(fake.view.user.providers["team-gateway"].models[0].contextWindow, 1000000);
+  assert.equal(fake.view.user.providers["team-gateway"].models[0].maxTokens, 8192);
+});
+
+test("refresh keeps customized models missing from the latest provider listing", async (t) => {
+  const { container, fake } = await mount(t);
+  await createProvider(container);
+  await click(button(container, "展开模型 deepseek-chat"));
+  const field = [...container.querySelectorAll(".dcp-model-advanced label")].find((label) => label.textContent === "上下文窗口");
+  await input(document.getElementById(field.htmlFor), "1M");
+  await click(button(container, "保存模型"));
+  await settle();
+  fake.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
+    { id: "new-model", name: "New Model", contextWindow: 128000 }
+  ] });
+  await click(button(container.querySelector(".dcp-model-catalog"), "获取可用模型"));
+  await settle();
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models, [
+    { id: "deepseek-chat", name: "DeepSeek Chat", contextWindow: 1000000 },
+    { id: "new-model", name: "New Model", contextWindow: 128000 }
+  ]);
 });
 
 test("creating a provider renders its card and working model search", async (t) => {

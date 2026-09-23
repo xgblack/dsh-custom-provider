@@ -21,7 +21,7 @@
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "prepack": "npm run build",
-    "test": "npm run build && node test/config.mjs && node test/client.mjs && node --test test/render.mjs",
+    "test": "npm run build && node test/config.mjs && node test/client.mjs && node --test test/modelsdev.mjs test/render.mjs",
     "test:config": "node test/config.mjs",
     "test:client": "node test/client.mjs"
   },
