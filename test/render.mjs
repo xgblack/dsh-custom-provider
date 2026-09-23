@@ -15,6 +15,7 @@ const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8"
 function host() {
   let view = { ns: "llm-pi-ai", schema: {}, revision: 1, base: {}, user: { providers: {} }, value: { providers: {} } };
   const mutations = [];
+  const storedKeys = new Set();
   let refusal;
   return {
     mutations,
@@ -27,7 +28,11 @@ function host() {
     },
     services: {
       remote: { $on: () => () => {} },
-      "remote.credentials": { describe: async () => ({ ok: true, value: {} }) },
+      "remote.credentials": {
+        describe: async (refs) => ({ ok: true, value: Object.fromEntries(refs.map((ref) =>
+          [ref, { configured: storedKeys.has(ref), writable: true }])) }),
+        set: async (ref) => { storedKeys.add(ref); return { ok: true }; }
+      },
       "remote.llm": {
         listConfigurableProviders: async () => ({ ok: true, value: [{ provider: "deepseek", displayName: "DeepSeek", settingsNs: "llm-pi-ai" }] }),
         discoverModels: async () => ({ ok: true, value: [{ id: "deepseek-chat", name: "DeepSeek Chat" }] })
@@ -54,8 +59,9 @@ function host() {
   };
 }
 
-async function mount(t) {
+async function mount(t, configure = () => {}) {
   const fake = host();
+  configure(fake);
   let plugin;
   vm.runInNewContext(source, {
     window: { __ModuleLoader__: { load: (entry) => { plugin = entry; } }, confirm: () => true },
@@ -93,18 +99,19 @@ async function input(el, value) {
 async function settle() {
   for (let at = 0; at < 10; at += 1) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
-async function createProvider(container) {
+async function createProvider(container, key = "", expectFailure = false) {
   await click(button(container, "添加模型供应商"));
   await click(button(container, "自定义模型 API"));
   await input(container.querySelector("#dcp-create-route"), "team-gateway");
   await input(container.querySelector("#dcp-create-name"), "团队网关");
   await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
   assert.equal(container.querySelector("#dcp-create-model"), null, "a provider starts without a model id");
+  if (key) await input(container.querySelector("#dcp-create-key"), key);
   await click(button(container, "获取可用模型"));
   await settle();
   await click(button(container, "添加"));
   await settle();
-  assert.equal(container.querySelector('[role="alert"]')?.textContent, undefined);
+  if (!expectFailure) assert.equal(container.querySelector('[role="alert"]')?.textContent, undefined);
 }
 
 test("custom provider discovery can be edited before creation", async (t) => {
@@ -126,6 +133,72 @@ test("custom provider discovery can be edited before creation", async (t) => {
   await click(remove);
   assert.match(container.textContent, /尚未获取模型/);
   assert.equal(fake.view.user.providers["draft-gateway"], undefined);
+});
+
+test("a newly saved provider turns green after its credential is stored without a model edit", async (t) => {
+  let releaseSave;
+  const { container } = await mount(t, (fake) => {
+    const credentials = fake.services["remote.credentials"];
+    const store = credentials.set;
+    credentials.set = (ref, key) => new Promise((resolve) => {
+      releaseSave = () => store(ref, key).then(resolve);
+    });
+  });
+  await createProvider(container, "test-key");
+  assert.ok(releaseSave, "settings were written before the credential was stored");
+  assert.ok(container.querySelector('[aria-label="缺少 API Key"]'), "an early credential read shows the missing state");
+  await act(async () => releaseSave());
+  await settle();
+  assert.ok(container.querySelector('[aria-label="已配置 API Key"]'), "the dot updates without saving a model or revisiting the page");
+  assert.equal(container.querySelector('[aria-label="缺少 API Key"]'), null);
+});
+
+test("a stale credential read cannot turn a newly saved provider red again", async (t) => {
+  let releaseSave;
+  let releaseStaleRead;
+  const { container } = await mount(t, (fake) => {
+    const credentials = fake.services["remote.credentials"];
+    const describe = credentials.describe;
+    const store = credentials.set;
+    credentials.describe = (refs) => {
+      const snapshot = describe(refs);
+      if (refs.includes("TEAM_GATEWAY_API_KEY") && !releaseStaleRead) {
+        return new Promise((resolve) => { releaseStaleRead = () => snapshot.then(resolve); });
+      }
+      return snapshot;
+    };
+    credentials.set = (ref, key) => new Promise((resolve) => {
+      releaseSave = () => store(ref, key).then(resolve);
+    });
+  });
+  await createProvider(container, "test-key");
+  assert.ok(releaseStaleRead, "a read was started before the key was stored");
+  await act(async () => releaseSave());
+  await settle();
+  assert.ok(container.querySelector('[aria-label="已配置 API Key"]'));
+  await act(async () => releaseStaleRead());
+  await settle();
+  assert.ok(container.querySelector('[aria-label="已配置 API Key"]'), "the old missing response must be ignored");
+  assert.equal(container.querySelector('[aria-label="缺少 API Key"]'), null);
+});
+
+test("a failed key save stays missing until the retry succeeds", async (t) => {
+  let rejectOnce = true;
+  const { container } = await mount(t, (fake) => {
+    const credentials = fake.services["remote.credentials"];
+    const store = credentials.set;
+    credentials.set = (ref, key) => {
+      if (rejectOnce) { rejectOnce = false; return { ok: false, error: { message: "credential store unavailable" } }; }
+      return store(ref, key);
+    };
+  });
+  await createProvider(container, "test-key", true);
+  assert.match(container.querySelector('[role="alert"]')?.textContent ?? "", /credential store unavailable/);
+  assert.ok(container.querySelector('[aria-label="缺少 API Key"]'));
+  await click(button(container, "重试保存密钥"));
+  await settle();
+  assert.ok(container.querySelector('[aria-label="已配置 API Key"]'));
+  assert.equal(container.querySelector('[aria-label="缺少 API Key"]'), null);
 });
 
 test("creating a provider renders its card and working model search", async (t) => {
