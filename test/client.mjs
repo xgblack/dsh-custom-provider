@@ -17,8 +17,9 @@ vm.runInNewContext(source, {
 
 assert.equal(plugin.id, "dsh-custom-provider");
 const client = plugin.factory((name) => {
-  assert.equal(name, "react");
-  return { createElement: () => ({}) };
+  if (name === "react") return { createElement: () => ({}) };
+  assert.equal(name, "@deepseek-ai/dsh-client-ui-primitives");
+  return { Modal: () => null };
 });
 assert.deepEqual(Array.from(client.inject), ["slots", "remote", "remote.settings", "remote.credentials", "remote.llm", "settingsSchema"]);
 

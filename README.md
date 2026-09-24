@@ -64,7 +64,7 @@ The bundled patch registers the plugin once. Do not add another `dsh-custom-prov
 1. Open dsh Web Settings and select **Model configuration** below **Models**.
 2. Select **Add model provider**.
 3. Choose a catalog provider, or choose **Custom model API** and enter a provider id, endpoint, and protocol.
-4. Enter the API key when the provider requires one, then fetch the available models.
+4. Enter the API key when the provider requires one, then fetch and select models in the dialog. Only selected models enter the provider draft.
 5. Save the provider and expand a model to edit its fields or JSON, or select **Fetch from models.dev** to import model metadata.
 
 Custom providers must use an explicit protocol. **Inherit catalog** is available only for installed catalog providers.
@@ -77,7 +77,7 @@ Custom providers must use an explicit protocol. **Inherit catalog** is available
 - Edit display name, endpoint, and protocol for writable provider fields.
 - Remove user-created providers. Providers inherited from the profile composition cannot be removed from this page.
 - Fetch and filter models using the adapter-owned `remote.llm` service. Recognizable official model IDs use installed pi-ai catalog metadata ahead of the provider response.
-- For explicit model lists, fetching again shows only model IDs not yet saved. Select the new models to add; fetching or cancelling alone never writes settings, and existing model entries remain unchanged. Catalog providers without an explicit list continue to refresh their displayed catalog.
+- For explicit model lists, both initial and repeat discovery use a model-selection dialog with nothing selected by default. Initial selection only updates the provider draft; on repeat discovery, only selected IDs not yet saved are appended. Fetching or cancelling never writes settings, and existing model entries remain unchanged. Catalog providers without an explicit list continue to refresh their displayed catalog.
 
 ### Model management
 
