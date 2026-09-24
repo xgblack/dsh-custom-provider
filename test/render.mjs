@@ -26,6 +26,11 @@ function host() {
     levels,
     get view() { return view; },
     reject(message) { refusal = message; },
+    addExternalModel(route, model) {
+      const user = structuredClone(view.user);
+      user.providers[route].models.push(model);
+      view = { ...view, user, value: structuredClone(user), revision: view.revision + 1 };
+    },
     fetchModelsDev: fakeModelsDev,
     schema: {
       rehydrate: (value) => value,
@@ -72,7 +77,7 @@ function host() {
         describe: async () => ({ ok: true, value: { writable: true, namespaces: [structuredClone(view)] } }),
         mutate: async (ns, ops, revision) => {
           assert.equal(ns, "llm-pi-ai");
-          assert.equal(revision, view.revision);
+          if (revision !== view.revision) return { ok: false, error: { code: "settings/conflict", message: "stale revision" } };
           if (refusal) { const message = refusal; refusal = undefined; return { ok: false, error: { message } }; }
           mutations.push(structuredClone(ops));
           const user = structuredClone(view.user);
@@ -390,7 +395,7 @@ test("a failed key save stays missing until the retry succeeds", async (t) => {
   assert.equal(container.querySelector('[aria-label="缺少 API Key"]'), null);
 });
 
-test("refresh keeps explicit user model fields above new provider and models.dev values", async (t) => {
+test("repeat discovery leaves an existing model untouched and does not write", async (t) => {
   let returnedContext = 128000;
   const { container, fake } = await mount(t, (host) => {
     host.services["remote.llm"].discoverModels = async (_ns, request) => ({ ok: true, value: request.provider === "deepseek"
@@ -406,13 +411,17 @@ test("refresh keeps explicit user model fields above new provider and models.dev
   await click(button(container, "保存模型"));
   await settle();
   returnedContext = 256000;
+  const writesBeforeFetch = fake.mutations.length;
   await click(button(container.querySelector(".dcp-model-catalog"), "获取可用模型"));
   await settle();
+  assert.equal(fake.mutations.length, writesBeforeFetch, "fetching alone must not write settings");
+  assert.match(container.textContent, /没有可新增的模型/);
+  assert.equal(container.querySelector('[aria-label="选择模型 deepseek-chat"]'), null);
   assert.equal(fake.view.user.providers["team-gateway"].models[0].contextWindow, 1000000);
   assert.equal(fake.view.user.providers["team-gateway"].models[0].maxTokens, 8192);
 });
 
-test("refresh keeps customized models missing from the latest provider listing", async (t) => {
+test("repeat discovery offers only new models and adds only the selected ones", async (t) => {
   const { container, fake } = await mount(t);
   await createProvider(container);
   await click(button(container, "展开模型 deepseek-chat"));
@@ -421,14 +430,88 @@ test("refresh keeps customized models missing from the latest provider listing",
   await click(button(container, "保存模型"));
   await settle();
   fake.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
-    { id: "new-model", name: "New Model", contextWindow: 128000 }
+    { id: "deepseek-chat", name: "Provider version", contextWindow: 128000 },
+    { id: "new-model", name: "New Model", contextWindow: 128000 },
+    { id: "new-model", name: "Duplicate Model", contextWindow: 64000 },
+    { id: "skipped-model", name: "Skipped Model", contextWindow: 64000 }
   ] });
+  const writesBeforeFetch = fake.mutations.length;
   await click(button(container.querySelector(".dcp-model-catalog"), "获取可用模型"));
   await settle();
+  assert.equal(fake.mutations.length, writesBeforeFetch);
+  assert.equal(container.querySelector('[aria-label="选择模型 deepseek-chat"]'), null, "saved models are not selectable");
+  const choice = container.querySelector('[aria-label="选择模型 new-model"]');
+  assert.ok(choice);
+  assert.equal(container.querySelectorAll('[aria-label="选择模型 new-model"]').length, 1, "duplicate IDs are offered once");
+  assert.equal(choice.checked, false, "new models are unchecked by default");
+  assert.ok(container.querySelector('[aria-label="选择模型 skipped-model"]'));
+  assert.equal(button(container, "添加所选 (0)").disabled, true);
+  await click(choice);
+  await click(button(container, "添加所选 (1)"));
+  await settle();
+  assert.equal(fake.mutations.length, writesBeforeFetch + 1, "selected models are saved in one write");
   assert.deepEqual(fake.view.user.providers["team-gateway"].models, [
     { id: "deepseek-chat", name: "DeepSeek Chat", contextWindow: 1000000 },
     { id: "new-model", name: "New Model", contextWindow: 128000 }
   ]);
+  await click(button(container.querySelector(".dcp-model-catalog"), "获取可用模型"));
+  await settle();
+  assert.equal(container.querySelector('[aria-label="选择模型 new-model"]'), null);
+  assert.ok(container.querySelector('[aria-label="选择模型 skipped-model"]'));
+  await click(button(container.querySelector(".dcp-discovery"), "取消"));
+  assert.equal(fake.mutations.length, writesBeforeFetch + 1, "cancel does not write settings");
+  assert.equal(container.querySelector(".dcp-discovery"), null);
+});
+
+test("selection rechecks the latest list and survives a rejected write", async (t) => {
+  const { container, fake } = await mount(t);
+  await createProvider(container);
+  fake.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
+    { id: "new-model", name: "New Model" }, { id: "other-model", name: "Other Model" }
+  ] });
+  await click(button(container.querySelector(".dcp-model-catalog"), "获取可用模型"));
+  await settle();
+  await click(container.querySelector('[aria-label="选择模型 new-model"]'));
+  await click(container.querySelector('[aria-label="选择模型 other-model"]'));
+  await click(button(container, "添加模型"));
+  await input(container.querySelector('[aria-label="新模型 ID"]'), "new-model");
+  await click(button(container.querySelector(".dcp-new-model"), "添加"));
+  await settle();
+  assert.equal(container.querySelector('[aria-label="选择模型 new-model"]'), null, "an ID added after fetching is no longer offered");
+  assert.equal(button(container, "添加所选 (1)").disabled, false);
+  fake.reject("host rejected selection");
+  const writesBeforeRetry = fake.mutations.length;
+  await click(button(container, "添加所选 (1)"));
+  await settle();
+  assert.match(container.querySelector(".dcp-discovery")?.parentElement.textContent ?? "", /host rejected selection/);
+  assert.ok(container.querySelector('[aria-label="选择模型 other-model"]').checked, "rejection keeps the selection");
+  assert.equal(fake.mutations.length, writesBeforeRetry);
+  await click(button(container, "添加所选 (1)"));
+  await settle();
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models.map((model) => model.id),
+    ["deepseek-chat", "new-model", "other-model"]);
+});
+
+test("a revision conflict preserves the selection and later appends to the refreshed list", async (t) => {
+  const { container, fake } = await mount(t);
+  await createProvider(container);
+  fake.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
+    { id: "new-model", name: "New Model" }
+  ] });
+  await click(button(container.querySelector(".dcp-model-catalog"), "获取可用模型"));
+  await settle();
+  await click(container.querySelector('[aria-label="选择模型 new-model"]'));
+  fake.addExternalModel("team-gateway", { id: "external-model", name: "External Model" });
+  const writesBeforeConflict = fake.mutations.length;
+  await click(button(container, "添加所选 (1)"));
+  await settle();
+  assert.equal(fake.mutations.length, writesBeforeConflict);
+  assert.ok(container.querySelector('[aria-label="选择模型 new-model"]').checked);
+  assert.match(container.textContent, /配置已被其他编辑更新/);
+  await click(button(container, "添加所选 (1)"));
+  await settle();
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models.map((model) => model.id),
+    ["deepseek-chat", "external-model", "new-model"]);
 });
 
 test("creating a provider renders its card and working model search", async (t) => {

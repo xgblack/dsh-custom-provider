@@ -77,7 +77,7 @@ Custom providers must use an explicit protocol. **Inherit catalog** is available
 - Edit display name, endpoint, and protocol for writable provider fields.
 - Remove user-created providers. Providers inherited from the profile composition cannot be removed from this page.
 - Fetch and filter models using the adapter-owned `remote.llm` service. Recognizable official model IDs use installed pi-ai catalog metadata ahead of the provider response.
-- Refresh model lists while retaining user-configured fields and models absent from the latest provider listing.
+- For explicit model lists, fetching again shows only model IDs not yet saved. Select the new models to add; fetching or cancelling alone never writes settings, and existing model entries remain unchanged. Catalog providers without an explicit list continue to refresh their displayed catalog.
 
 ### Model management
 
