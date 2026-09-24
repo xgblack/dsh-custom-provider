@@ -159,7 +159,7 @@ const emptyProvider = createProviderOperation(providerView, "empty-gateway", { a
 assert.deepEqual(candidate(providerView, emptyProvider).providers["empty-gateway"].models, []);
 const added = addModelOperation(providerView, "deepseek", { id: "b" });
 assert.deepEqual(added.value, [{ id: "a" }, { id: "b" }]);
-assert.deepEqual(removeModelOperation(providerView, "deepseek", "a").value, []);
+assert.throws(() => removeModelOperation(providerView, "deepseek", "a"), /At least one model/);
 assert.deepEqual(removeModelOperation(listed, route, "a").value, [{ id: "b", name: "B" }]);
 assert.throws(() => addModelOperation(catalog, route, { id: "new" }), /explicit user model list/);
 assert.throws(() => addModelOperation(providerView, "deepseek", { id: "a" }), /already exists/);

@@ -21,14 +21,22 @@ function Modal({ open, title, className, onClose, onKeyDownCapture, children, fo
 function host() {
   let view = { ns: "llm-pi-ai", schema: {}, revision: 1, base: {}, user: { providers: {} }, value: { providers: {} } };
   const mutations = [];
+  const confirmations = [];
   const storedKeys = new Set();
   const levels = [...HOST_REASONING_LEVELS];
   let refusal;
   const fakeModelsDev = async () => ({ ok: true, json: async () => ({}) });
   return {
     mutations,
+    confirmations,
     levels,
     get view() { return view; },
+    confirm(message) { confirmations.push(message); return true; },
+    setProvider(route, profile) {
+      const user = structuredClone(view.user);
+      user.providers[route] = structuredClone(profile);
+      view = { ...view, user, value: structuredClone(user), revision: view.revision + 1 };
+    },
     reject(message) { refusal = message; },
     addExternalModel(route, model) {
       const user = structuredClone(view.user);
@@ -104,7 +112,7 @@ async function mount(t, configure = () => {}) {
   configure(fake);
   let plugin;
   vm.runInNewContext(source, {
-    window: { __ModuleLoader__: { load: (entry) => { plugin = entry; } }, confirm: () => true },
+    window: { __ModuleLoader__: { load: (entry) => { plugin = entry; } }, confirm: (...args) => fake.confirm(...args) },
     document, navigator: { language: "zh-CN" }, console, URL, AbortController, setTimeout, clearTimeout,
     fetch: (...args) => fake.fetchModelsDev(...args)
   });
@@ -649,14 +657,43 @@ test("creating a provider renders its card and working model search", async (t) 
   await input(search, "");
   const removeModel = button(container, "删除模型 deepseek-chat");
   assert.equal(removeModel.disabled, false);
+  const writesBeforeRemoval = fake.mutations.length;
+  const confirmationsBeforeRemoval = fake.confirmations.length;
   await click(removeModel);
   await settle();
-  assert.deepEqual(fake.mutations.at(-1), [{ op: "set", path: ["providers", "team-gateway", "models"], value: [] }]);
-  assert.deepEqual(fake.view.user.providers["team-gateway"].models, [], "the last model can be removed");
-  assert.match(container.textContent, /暂无模型/);
+  assert.equal(fake.confirmations.length, confirmationsBeforeRemoval, "the last model does not open a deletion confirmation");
+  assert.equal(fake.mutations.length, writesBeforeRemoval, "the last model never writes an empty list");
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models.map((model) => model.id), ["deepseek-chat"]);
+  assert.match(container.querySelector('.dcp-model-catalog [role="alert"]')?.textContent ?? "", /至少需要保留一个模型；如不再使用，请删除整个提供方/);
   await click(button(container, "收起"));
   await click(button(container, "编辑"));
-  assert.match(container.textContent, /暂无模型/);
+  assert.ok(button(container, "删除模型 deepseek-chat"));
+});
+
+test("catalog lists keep ordinary deletion but explain the last-model fallback", async (t) => {
+  const { container, fake } = await mount(t, (host) => host.setProvider("deepseek", {
+    models: [{ id: "deepseek-chat" }, { id: "deepseek-reasoner" }]
+  }));
+  await click(button(container, "编辑"));
+  fake.reject("host rejected deletion");
+  await click(button(container, "删除模型 deepseek-chat"));
+  assert.match(container.querySelector('.dcp-model-catalog [role="alert"]')?.textContent ?? "", /host rejected deletion/);
+  assert.equal(fake.view.user.providers.deepseek.models.length, 2, "host rejection retains both models");
+  await click(button(container, "删除模型 deepseek-chat"));
+  assert.deepEqual(fake.view.user.providers.deepseek.models, [{ id: "deepseek-reasoner" }]);
+  const writesBeforeLast = fake.mutations.length;
+  const confirmationsBeforeLast = fake.confirmations.length;
+  await click(button(container, "删除模型 deepseek-reasoner"));
+  assert.equal(fake.confirmations.length, confirmationsBeforeLast);
+  assert.equal(fake.mutations.length, writesBeforeLast);
+  assert.deepEqual(fake.view.user.providers.deepseek.models, [{ id: "deepseek-reasoner" }]);
+  assert.match(container.querySelector('.dcp-model-catalog [role="alert"]')?.textContent ?? "", /清空列表会恢复内置目录中的全部模型/);
+  await click(button(container, "获取可用模型"));
+  await settle();
+  await click(container.querySelector('[aria-label="选择模型 deepseek-chat"]'));
+  await click(button(container, "添加所选 (1)"));
+  assert.equal(container.querySelector('.dcp-model-catalog [role="alert"]'), null, "adding a model clears the stale last-model warning");
+  assert.deepEqual(fake.view.user.providers.deepseek.models.map((model) => model.id), ["deepseek-reasoner", "deepseek-chat"]);
 });
 
 test("the reasoning level list comes from the host schema", async (t) => {
