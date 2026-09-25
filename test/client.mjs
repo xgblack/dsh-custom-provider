@@ -36,7 +36,10 @@ client.apply({
   },
   effect: (callback) => callback(),
   locale: {
-    bind: () => (key) => ({ nav: "模型配置" })[key] ?? key,
+    bind: (namespace) => {
+      assert.equal(namespace, "settings.customProvider");
+      return (key) => ({ nav: "模型配置" })[key] ?? key;
+    },
     register: () => {}
   },
   settingsSchema: {},

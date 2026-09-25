@@ -30,7 +30,10 @@ function host() {
     mutations,
     levels,
     locale: {
-      bind: () => (key) => dictionaries[activeLocale][key] ?? key,
+      bind: (namespace) => {
+        assert.equal(namespace, "settings.customProvider");
+        return (key) => dictionaries[activeLocale][key] ?? key;
+      },
       register: (_ns, values) => { dictionaries.zh = values.zh; dictionaries.en = values.en; },
       setLocale: (locale) => { activeLocale = locale; }
     },
