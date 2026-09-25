@@ -109,7 +109,7 @@ async function mount(t, configure = () => {}) {
   let plugin;
   vm.runInNewContext(source, {
     window: { __ModuleLoader__: { load: (entry) => { plugin = entry; } }, confirm: () => true },
-    document, navigator: { language: "zh-CN" }, console, URL, AbortController, setTimeout, clearTimeout,
+    document, navigator: { language: "zh-CN" }, console, URL, Blob, AbortController, setTimeout, clearTimeout,
     fetch: (...args) => fake.fetchModelsDev(...args)
   });
   const client = plugin.factory(() => React);
@@ -143,6 +143,13 @@ async function input(el, value) {
 }
 async function settle() {
   for (let at = 0; at < 10; at += 1) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+}
+async function chooseTransferFile(container, value) {
+  const field = container.querySelector(".dcp-transfer-file");
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  Object.defineProperty(field, "files", { configurable: true, value: [{ size: text.length, text: async () => text }] });
+  await act(async () => field.dispatchEvent(new window.Event("change", { bubbles: true })));
+  await settle();
 }
 function modelEntry(container, modelId) {
   const row = [...container.querySelectorAll(".dcp-model-entry")]
@@ -211,6 +218,70 @@ test("settings section follows the host locale dictionary", async (t) => {
   fake.locale.setLocale("en");
   await act(async () => root.render(React.createElement(entry.component, entry.options.inject())));
   assert.equal(entry.options.label(), "Model configuration");
+});
+
+test("bulk import previews additions, skips existing routes and commits selected providers once", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.services["remote.credentials"].set = async () => { throw new Error("import must not store credentials"); };
+  });
+  const bundle = { format: "dsh-custom-provider/providers", version: 1, omittedHeaders: ["team-one"], providers: {
+    "team-one": { apiKeyEnv: "TEAM_ONE_API_KEY", api: "openai-responses", baseURL: "https://one.invalid/v1", models: [{ id: "a" }] },
+    "team-two": { api: "openai-completions", baseURL: "https://two.invalid/v1", models: [{ id: "b" }] }
+  } };
+  await click(button(container, "导入配置"));
+  await chooseTransferFile(container, bundle);
+  assert.match(container.textContent, /请求头未包含/);
+  await click(button(container, "导入所选 2 项"));
+  await settle();
+  assert.equal(fake.mutations.length, 1);
+  assert.deepEqual(fake.mutations[0].map((op) => op.path), [
+    ["providers", "team-one"], ["providers", "team-two"]
+  ]);
+  assert.equal(fake.view.user.providers["team-one"].apiKeyEnv, "TEAM_ONE_API_KEY");
+  assert.match(container.textContent, /重新配置缺失密钥/);
+
+  await chooseTransferFile(container, bundle);
+  assert.equal(button(container, "导入所选 0 项").disabled, true, "collisions are skipped by default");
+  const decision = container.querySelector('[aria-label="team-one 的导入方式"]');
+  await act(async () => { decision.value = "replace"; decision.dispatchEvent(new window.Event("change", { bubbles: true })); });
+  await click(button(container, "导入所选 1 项"));
+  await settle();
+  assert.equal(fake.mutations.length, 2);
+  assert.deepEqual(fake.mutations[1].map((op) => op.path), [["providers", "team-one"]]);
+});
+
+test("bulk import rejects embedded headers and read-only settings", async (t) => {
+  const { container, fake } = await mount(t);
+  await click(button(container, "导入配置"));
+  await chooseTransferFile(container, { format: "dsh-custom-provider/providers", version: 1, omittedHeaders: [],
+    providers: { unsafe: { headers: { Authorization: "Bearer private" } } } });
+  assert.match(container.querySelector('[role="alert"]').textContent, /embedded headers/);
+  assert.equal(fake.mutations.length, 0);
+  const { container: readonly } = await mount(t, (host) => {
+    const describe = host.services["remote.settings"].describe;
+    host.services["remote.settings"].describe = async () => {
+      const response = await describe(); response.value.writable = false; return response;
+    };
+  });
+  await click(button(readonly, "导入配置"));
+  assert.equal(readonly.querySelector(".dcp-transfer-file").disabled, true);
+});
+
+test("bulk export downloads user settings without custom headers", async (t) => {
+  const { container } = await mount(t);
+  await createProvider(container);
+  let captured;
+  const createObjectURL = URL.createObjectURL;
+  const anchorClick = window.HTMLAnchorElement.prototype.click;
+  URL.createObjectURL = (blob) => { captured = blob; return createObjectURL(blob); };
+  window.HTMLAnchorElement.prototype.click = function () { assert.equal(this.download, "dsh-providers.json"); };
+  t.after(() => { URL.createObjectURL = createObjectURL; window.HTMLAnchorElement.prototype.click = anchorClick; });
+  await click(button(container, "导出配置"));
+  await click(button(container, "下载 JSON"));
+  const bundle = JSON.parse(await captured.text());
+  assert.deepEqual(Object.keys(bundle.providers), ["team-gateway"]);
+  assert.equal(Object.hasOwn(bundle.providers["team-gateway"], "headers"), false);
+  assert.equal(Object.hasOwn(bundle.providers["team-gateway"], "apiKey"), false);
 });
 
 test("models.dev fills the model draft; Save model is the only commit action", async (t) => {

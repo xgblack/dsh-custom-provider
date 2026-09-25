@@ -93,6 +93,14 @@ Custom providers must use an explicit protocol. **Inherit catalog** is available
 
 ## Data and write behavior
 
+### Bulk provider transfer
+
+Use **Export configuration** to select and download multiple explicitly configured providers as a versioned JSON file. This transfers the user-owned provider profiles, including model lists, overrides, and advanced settings. Providers that exist only in inherited profile layers and models supplied only by the installed catalog are not copied.
+
+The export omits credential values and custom request headers. It retains `apiKeyEnv` reference names, so an imported route may use an existing credential with that name on the destination; check the reference and configure any missing key after import. Endpoint URLs can themselves contain sensitive parameters, so inspect and protect the JSON file accordingly. Routes that depended on custom headers need those headers configured again.
+
+Use **Import configuration** to review the file before writing. Existing routes are skipped by default; choose **Replace** individually to overwrite their user-owned configuration. New routes are selected by default. The selected routes are validated and submitted together with the current settings revision. Import never deletes unselected routes or changes stored credentials. The destination's inherited layers and installed model catalog still determine the final effective configuration; an incompatible file is rejected rather than adapted silently.
+
 The page follows the host `llm-pi-ai` schema and storage boundaries:
 
 - Settings writes target the real `llm-pi-ai` namespace through revisioned `remote.settings` operations.
