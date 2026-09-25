@@ -21,9 +21,19 @@ function host() {
   const levels = [...HOST_REASONING_LEVELS];
   let refusal;
   const fakeModelsDev = async () => ({ ok: true, json: async () => ({}) });
+  let activeLocale = "zh";
+  const dictionaries = {
+    zh: { nav: "模型配置" },
+    en: { nav: "Model configuration" }
+  };
   return {
     mutations,
     levels,
+    locale: {
+      bind: () => (key) => dictionaries[activeLocale][key] ?? key,
+      register: (_ns, values) => { dictionaries.zh = values.zh; dictionaries.en = values.en; },
+      setLocale: (locale) => { activeLocale = locale; }
+    },
     get view() { return view; },
     reject(message) { refusal = message; },
     fetchModelsDev: fakeModelsDev,
@@ -104,14 +114,14 @@ async function mount(t, configure = () => {}) {
   const effects = [];
   client.apply({
     slots: { inject: (_name, callback) => callback(), register: (options, component) => { entry = { options, component }; } },
-    effect: (callback) => effects.push(callback()), settingsSchema: fake.schema, get: (name) => fake.services[name]
+    effect: (callback) => effects.push(callback()), settingsSchema: fake.schema, locale: fake.locale, get: (name) => fake.services[name]
   });
   const container = document.createElement("main");
   document.body.append(container);
   const root = createRoot(container);
   t.after(async () => { await act(async () => root.unmount()); effects.forEach((dispose) => dispose?.()); container.remove(); });
   await act(async () => root.render(React.createElement(entry.component, entry.options.inject())));
-  return { container, fake };
+  return { container, fake, entry, root };
 }
 
 function button(container, name) {
@@ -189,6 +199,15 @@ test("custom provider discovery can be edited before creation", async (t) => {
   await click(remove);
   assert.match(container.textContent, /尚未获取模型/);
   assert.equal(fake.view.user.providers["draft-gateway"], undefined);
+});
+
+test("settings section follows the host locale dictionary", async (t) => {
+  const { container, fake, entry, root } = await mount(t);
+  assert.equal(entry.options.label(), "模型配置");
+  assert.match(container.textContent, /模型配置/);
+  fake.locale.setLocale("en");
+  await act(async () => root.render(React.createElement(entry.component, entry.options.inject())));
+  assert.equal(entry.options.label(), "Model configuration");
 });
 
 test("models.dev fills the model draft; Save model is the only commit action", async (t) => {
