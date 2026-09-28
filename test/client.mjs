@@ -41,7 +41,10 @@ client.apply({
       assert.equal(namespace, "settings.customProvider");
       return (key) => ({ nav: "模型配置" })[key] ?? key;
     },
-    register: () => {}
+    register: () => {},
+    subscribe: () => () => {},
+    getSnapshot: () => ({ active: "zh", revision: 0 }),
+    resolveText: (value) => value.zh
   },
   settingsSchema: {},
   get: (name) => services[name]
@@ -58,5 +61,8 @@ const injected = registration.options.inject();
 assert.equal(injected.api.settings, services["remote.settings"]);
 assert.equal(injected.api.credentials, services["remote.credentials"]);
 assert.equal(injected.api.llm, services["remote.llm"]);
+assert.equal(typeof injected.subscribeLocale, "function");
+assert.equal(injected.getLocaleRevision(), 0);
+assert.equal(injected.resolveText({ zh: "模型配置", en: "Model configuration" }), "模型配置");
 
 console.log("client: independent Model configuration section registration passed");

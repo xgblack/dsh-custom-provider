@@ -27,6 +27,8 @@ function host() {
   let refusal;
   const fakeModelsDev = async () => ({ ok: true, json: async () => ({}) });
   let activeLocale = "zh";
+  let localeRevision = 0;
+  const localeListeners = new Set();
   const dictionaries = {
     zh: { nav: "模型配置" },
     en: { nav: "Model configuration" }
@@ -41,7 +43,10 @@ function host() {
         return (key) => dictionaries[activeLocale][key] ?? key;
       },
       register: (_ns, values) => { dictionaries.zh = values.zh; dictionaries.en = values.en; },
-      setLocale: (locale) => { activeLocale = locale; }
+      getSnapshot: () => ({ active: activeLocale, revision: localeRevision }),
+      subscribe: (listener) => { localeListeners.add(listener); return () => localeListeners.delete(listener); },
+      resolveText: (value) => value[activeLocale] ?? value.en,
+      setLocale: (locale) => { activeLocale = locale; localeRevision++; localeListeners.forEach((listener) => listener()); }
     },
     get view() { return view; },
     confirm(message) { confirmations.push(message); return true; },
@@ -243,13 +248,156 @@ test("custom provider discovery can be edited before creation", async (t) => {
   assert.equal(fake.view.user.providers["draft-gateway"], undefined);
 });
 
+test("the first picker adds only chosen models to the creation draft", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
+      { id: "model-a", name: "Model A" }, { id: "model-b", name: "Model B" }
+    ] });
+  });
+  await click(button(container, "添加模型供应商"));
+  await click(button(container, "自定义模型 API"));
+  await input(container.querySelector("#dcp-create-route"), "draft-gateway");
+  await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
+  await click(button(container, "获取可用模型"));
+  await settle();
+  const picker = container.querySelector('.dcp-model-picker[role="dialog"]');
+  assert.ok(picker, "first discovery uses the shared dialog");
+  assert.equal(button(picker, "添加所选 (0)").disabled, true);
+  assert.equal(container.querySelector(".dcp-add-card .dcp-model-entry"), null);
+  await click(picker.querySelector('[aria-label="选择模型 model-a"]'));
+  await click(button(picker, "添加所选 (1)"));
+  assert.equal(fake.mutations.length, 0, "picker confirmation only updates the local draft");
+  assert.deepEqual([...container.querySelectorAll(".dcp-add-card .dcp-model-entry .dcp-provider-route")].map((el) => el.textContent), ["model-a"]);
+  await click(button(container, "获取可用模型"));
+  await settle();
+  const second = container.querySelector(".dcp-model-picker");
+  assert.equal(second.querySelector('[aria-label="选择模型 model-a"]'), null);
+  assert.equal(second.querySelector('[aria-label="选择模型 model-b"]').checked, false);
+  await click(second.querySelector('[aria-label="选择模型 model-b"]'));
+  await click(button(second, "取消"));
+  assert.equal(fake.mutations.length, 0);
+  await click(button(container, "获取可用模型"));
+  await settle();
+  const third = container.querySelector(".dcp-model-picker");
+  assert.equal(third.querySelector('[aria-label="选择模型 model-a"]'), null);
+  await click(third.querySelector('[aria-label="选择模型 model-b"]'));
+  await click(button(third, "添加所选 (1)"));
+  assert.equal(fake.mutations.length, 0, "another confirmed batch still only updates the draft");
+  await click(button(container, "添加"));
+  await settle();
+  assert.deepEqual(fake.view.user.providers["draft-gateway"].models,
+    [{ id: "model-a", name: "Model A" }, { id: "model-b", name: "Model B" }]);
+});
+
+test("a discovery error stays in the picker and can be retried", async (t) => {
+  let attempts = 0;
+  const { container, fake } = await mount(t, (host) => {
+    host.services["remote.llm"].discoverModels = async () => ++attempts === 1
+      ? { ok: false, error: { message: "discovery offline" } }
+      : { ok: true, value: [{ id: "model-a" }] };
+  });
+  await click(button(container, "添加模型供应商"));
+  await click(button(container, "自定义模型 API"));
+  await input(container.querySelector("#dcp-create-route"), "draft-gateway");
+  await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
+  await click(button(container, "获取可用模型"));
+  await settle();
+  const picker = container.querySelector(".dcp-model-picker");
+  assert.match(picker.querySelector('[role="alert"]')?.textContent ?? "", /discovery offline/);
+  assert.equal(fake.mutations.length, 0);
+  await click(button(picker, "重试"));
+  await settle();
+  assert.ok(picker.querySelector('[aria-label="选择模型 model-a"]'));
+  await click(picker.querySelector('[aria-label="选择模型 model-a"]'));
+  await click(button(picker, "添加所选 (1)"));
+  await click(button(container, "添加"));
+  await settle();
+  assert.deepEqual(fake.view.user.providers["draft-gateway"].models, [{ id: "model-a" }]);
+});
+
+test("a discovery failure can switch to manual model entry without losing the provider draft", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.services["remote.llm"].discoverModels = async () => ({ ok: false, error: { message: "listing unavailable" } });
+  });
+  await click(button(container, "添加模型供应商"));
+  await click(button(container, "自定义模型 API"));
+  await input(container.querySelector("#dcp-create-route"), "manual-gateway");
+  await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
+  await input(container.querySelector("#dcp-create-key"), "test-key");
+  assert.equal(container.querySelector(".dcp-add-card .dcp-form > .dcp-actions .dcp-button-primary").disabled, true);
+  await click(button(container, "获取可用模型"));
+  await settle();
+  const picker = container.querySelector(".dcp-model-picker");
+  assert.match(picker.querySelector('[role="alert"]')?.textContent ?? "", /listing unavailable/);
+  await click(button(picker, "手工添加模型"));
+  await settle();
+  const manualInput = container.querySelector("#dcp-create-manual-model");
+  assert.equal(document.activeElement, manualInput, "the failed picker hands focus to manual entry");
+  assert.equal(container.querySelector("#dcp-create-key").value, "test-key");
+  assert.equal(container.querySelector("#dcp-create-route").value, "manual-gateway");
+  await input(manualInput, "  vendor/model-v1  ");
+  assert.equal(container.querySelector(".dcp-add-card .dcp-form > .dcp-actions .dcp-button-primary").disabled, true,
+    "an uncommitted model ID cannot be silently omitted from creation");
+  await click(button(container, "添加"));
+  assert.equal(fake.mutations.length, 0, "manual entry changes only the draft");
+  assert.deepEqual([...container.querySelectorAll(".dcp-add-card .dcp-model-entry .dcp-provider-route")].map((el) => el.textContent), ["vendor/model-v1"]);
+  fake.reject("host rejected manual route");
+  await click(button(container, "添加"));
+  assert.match(container.querySelector(".dcp-add-card [role='alert']")?.textContent ?? "", /host rejected manual route/);
+  assert.equal(fake.view.user.providers["manual-gateway"], undefined);
+  assert.equal(container.querySelector("#dcp-create-key").value, "test-key");
+  assert.deepEqual([...container.querySelectorAll(".dcp-add-card .dcp-model-entry .dcp-provider-route")].map((el) => el.textContent), ["vendor/model-v1"]);
+  await click(button(container, "添加"));
+  await settle();
+  assert.deepEqual(fake.view.user.providers["manual-gateway"].models, [{ id: "vendor/model-v1" }]);
+  assert.equal((await fake.services["remote.credentials"].describe(["MANUAL_GATEWAY_API_KEY"]))
+    .value.MANUAL_GATEWAY_API_KEY.configured, true);
+});
+
+test("manual and discovered models share one deduplicated creation draft", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
+      { id: "manual-id", name: "Upstream name" }, { id: "auto-id", name: "Auto model" }
+    ] });
+  });
+  await click(button(container, "添加模型供应商"));
+  await click(button(container, "自定义模型 API"));
+  await input(container.querySelector("#dcp-create-route"), "mixed-gateway");
+  await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
+  await click(button(container, "手工添加模型"));
+  await input(container.querySelector("#dcp-create-manual-model"), "manual-id");
+  await click(button(container, "添加"));
+  await click(button(container, "手工添加模型"));
+  await input(container.querySelector("#dcp-create-manual-model"), "manual-id");
+  await click(button(container, "添加"));
+  assert.match(container.querySelector(".dcp-add-card [role='alert']")?.textContent ?? "", /已在列表中/);
+  assert.equal(container.querySelectorAll(".dcp-add-card .dcp-model-entry").length, 1);
+  await click(button(container, "取消"));
+  await click(button(container, "获取可用模型"));
+  await settle();
+  const picker = container.querySelector(".dcp-model-picker");
+  assert.equal(picker.querySelector('[aria-label="选择模型 manual-id"]'), null);
+  await click(picker.querySelector('[aria-label="选择模型 auto-id"]'));
+  await click(button(picker, "添加所选 (1)"));
+  assert.equal(fake.mutations.length, 0);
+  await click(button(container, "添加"));
+  await settle();
+  assert.deepEqual(fake.view.user.providers["mixed-gateway"].models,
+    [{ id: "manual-id" }, { id: "auto-id", name: "Auto model" }]);
+});
+
 test("settings section follows the host locale dictionary", async (t) => {
-  const { container, fake, entry, root } = await mount(t);
+  const { container, fake, entry } = await mount(t);
   assert.equal(entry.options.label(), "模型配置");
   assert.match(container.textContent, /模型配置/);
-  fake.locale.setLocale("en");
-  await act(async () => root.render(React.createElement(entry.component, entry.options.inject())));
+  assert.ok(button(container, "添加模型供应商"));
+  await act(async () => fake.locale.setLocale("en"));
   assert.equal(entry.options.label(), "Model configuration");
+  assert.match(container.textContent, /Model configuration/);
+  assert.ok(button(container, "Add model provider"));
+  assert.ok(button(container, "Import configuration"));
+  await act(async () => fake.locale.setLocale("zh"));
+  assert.ok(button(container, "添加模型供应商"));
 });
 
 test("bulk import previews additions, skips existing routes and commits selected providers once", async (t) => {
@@ -610,6 +758,34 @@ test("repeat discovery offers only new models and adds only the selected ones", 
   await click(button(container.querySelector(".dcp-model-picker"), "取消"));
   assert.equal(fake.mutations.length, writesBeforeFetch + 1, "cancel does not write settings");
   assert.equal(container.querySelector(".dcp-model-picker"), null);
+});
+
+test("selecting a new model retains configured models absent from discovery", async (t) => {
+  const { container, fake } = await mount(t);
+  await createProvider(container);
+  await click(button(container, "展开模型 deepseek-chat"));
+  const field = [...container.querySelectorAll(".dcp-model-advanced label")]
+    .find((label) => label.textContent === "上下文窗口");
+  await input(document.getElementById(field.htmlFor), "1M");
+  await click(button(container, "保存模型"));
+  await settle();
+  const previous = structuredClone(fake.view.user.providers["team-gateway"].models[0]);
+  fake.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
+    { id: "new-model", name: "New Model", contextWindow: 128000 }
+  ] });
+  const writesBeforeFetch = fake.mutations.length;
+  await click(button(container.querySelector(".dcp-model-catalog"), "获取可用模型"));
+  await settle();
+  assert.equal(fake.mutations.length, writesBeforeFetch);
+  assert.equal(container.querySelector('[aria-label="选择模型 deepseek-chat"]'), null);
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models, [previous]);
+  await click(container.querySelector('[aria-label="选择模型 new-model"]'));
+  await click(button(container, "添加所选 (1)"));
+  await settle();
+  assert.equal(fake.mutations.length, writesBeforeFetch + 1);
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models, [
+    previous, { id: "new-model", name: "New Model", contextWindow: 128000 }
+  ]);
 });
 
 test("selection rechecks the latest list and survives a rejected write", async (t) => {
