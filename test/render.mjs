@@ -284,6 +284,35 @@ test("bulk export downloads user settings without custom headers", async (t) => 
   assert.equal(Object.hasOwn(bundle.providers["team-gateway"], "apiKey"), false);
 });
 
+test("bulk export includes official Models configuration from the base layer but excludes built-in DeepSeek routes", async (t) => {
+  const { container } = await mount(t, (host) => {
+    host.view.base.providers = {
+      "base-gateway": { displayName: "Base Gateway", api: "openai-responses", models: [{ id: "base-model" }],
+        headers: { Authorization: "Bearer private" } },
+      "deepseek-account": { models: [{ id: "account-model" }] },
+      "deepseek-official": { models: [{ id: "official-model" }] }
+    };
+    host.view.value.providers = structuredClone(host.view.base.providers);
+  });
+  let captured;
+  const createObjectURL = URL.createObjectURL;
+  const anchorClick = window.HTMLAnchorElement.prototype.click;
+  URL.createObjectURL = (blob) => { captured = blob; return createObjectURL(blob); };
+  window.HTMLAnchorElement.prototype.click = function () { assert.equal(this.download, "dsh-providers.json"); };
+  t.after(() => { URL.createObjectURL = createObjectURL; window.HTMLAnchorElement.prototype.click = anchorClick; });
+  await click(button(container, "导出配置"));
+  const names = [...container.querySelectorAll(".dcp-transfer-row .dcp-transfer-name")].map((el) => el.textContent.trim());
+  assert.equal(names.length, 1);
+  assert.match(names[0], /Base Gateway/);
+  assert.doesNotMatch(container.textContent, /没有用户配置的提供方可导出/);
+  await click(button(container, "下载 JSON"));
+  const bundle = JSON.parse(await captured.text());
+  assert.deepEqual(Object.keys(bundle.providers), ["base-gateway"]);
+  assert.deepEqual(bundle.providers["base-gateway"].models, [{ id: "base-model" }]);
+  assert.deepEqual(bundle.omittedHeaders, ["base-gateway"]);
+  assert.doesNotMatch(JSON.stringify(bundle), /private/);
+});
+
 test("models.dev fills the model draft; Save model is the only commit action", async (t) => {
   let fetchCount = 0;
   const { container, fake } = await mount(t, (host) => {
