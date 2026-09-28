@@ -8,11 +8,14 @@ import {
   derivedKeyRef,
   editableModel,
   effectiveModel,
+  exportProviderBundle,
   modelEntries,
   modelMode,
   parseModelJson,
+  parseProviderBundle,
   patchModelOperation,
   patchProviderOperation,
+  providerImportOperations,
   providerKind,
   providerRemovable,
   removeModelOperation,
@@ -200,5 +203,70 @@ const conflict = await commitOperation({ settings: { mutate: async () => ({
   ok: false, error: { code: "settings/conflict", message: "stale revision" }
 }) } }, schema, listed, common);
 assert.deepEqual(conflict, { kind: "conflict", message: "stale revision" });
+
+const transferSource = {
+  user: { providers: {
+    deepseek: { apiKeyEnv: "DEEPSEEK_API_KEY", modelOverrides: { chat: { maxTokens: 4096 } },
+      headers: { Authorization: "Bearer private" } },
+    "team-gateway": { api: "openai-responses", baseURL: "https://example.invalid/v1",
+      models: [{ id: "a", compat: { thinkingFormat: "openai" } }] }
+  } },
+  value: { providers: {
+    deepseek: { apiKeyEnv: "DEEPSEEK_API_KEY", modelOverrides: { chat: { maxTokens: 4096 } },
+      headers: { Authorization: "Bearer private" } },
+    "team-gateway": { api: "openai-responses", baseURL: "https://example.invalid/v1",
+      models: [{ id: "a", compat: { thinkingFormat: "openai" } }] },
+    inherited: { models: [{ id: "hidden" }] }
+  } }
+};
+const bundle = exportProviderBundle(transferSource, ["deepseek", "team-gateway"]);
+assert.deepEqual(bundle.omittedHeaders, ["deepseek"]);
+assert.deepEqual(bundle.providers.deepseek, { apiKeyEnv: "DEEPSEEK_API_KEY", modelOverrides: { chat: { maxTokens: 4096 } } });
+assert.deepEqual(bundle.providers["team-gateway"].models[0].compat, { thinkingFormat: "openai" });
+assert.equal(Object.hasOwn(bundle.providers, "inherited"), false);
+assert.doesNotMatch(JSON.stringify(bundle), /private/);
+assert.deepEqual(parseProviderBundle(JSON.stringify(bundle)), bundle);
+const legacyBundle = exportProviderBundle({ value: { providers: { Legacy_ID: { models: [{ id: "a" }] } } } }, ["Legacy_ID"]);
+assert.deepEqual(Object.keys(parseProviderBundle(JSON.stringify(legacyBundle)).providers), ["Legacy_ID"]);
+const inheritedBundle = exportProviderBundle(transferSource, ["inherited"]);
+assert.deepEqual(inheritedBundle.providers.inherited.models, [{ id: "hidden" }]);
+const composedSource = {
+  base: { providers: { "official-page": { api: "openai-responses", models: [{ id: "base-model" }], headers: { Authorization: "Bearer private" } } } },
+  user: { providers: { "official-page": { displayName: "Configured in Models" } } },
+  value: { providers: {
+    "official-page": { api: "openai-responses", displayName: "Configured in Models", models: [{ id: "base-model" }], headers: { Authorization: "Bearer private" } },
+    "deepseek-account": { models: [{ id: "account" }] },
+    "deepseek-official": { models: [{ id: "official" }] }
+  } }
+};
+const composedBundle = exportProviderBundle(composedSource, ["official-page"]);
+assert.deepEqual(composedBundle.providers["official-page"], {
+  api: "openai-responses", displayName: "Configured in Models", models: [{ id: "base-model" }]
+});
+assert.deepEqual(composedBundle.omittedHeaders, ["official-page"]);
+assert.doesNotMatch(JSON.stringify(composedBundle), /private/);
+assert.throws(() => exportProviderBundle(composedSource, ["deepseek-account"]), /not exportable/);
+assert.throws(() => exportProviderBundle(composedSource, ["deepseek-official"]), /not exportable/);
+assert.throws(() => exportProviderBundle(transferSource, ["missing"]), /no exportable configuration/);
+assert.throws(() => exportProviderBundle(transferSource, []), /Select at least one/);
+assert.throws(() => parseProviderBundle("{"), /Invalid JSON/);
+assert.throws(() => parseProviderBundle(JSON.stringify({ ...bundle, version: 2 })), /Unsupported/);
+assert.throws(() => parseProviderBundle(JSON.stringify({ ...bundle, providers: { bad: { headers: { Authorization: "secret" } } } })), /embedded headers/);
+assert.throws(() => parseProviderBundle('{"format":"dsh-custom-provider/providers","version":1,"providers":{"__proto__":{}},"omittedHeaders":[]}'), /invalid ID/);
+
+const transferTarget = { value: { providers: { deepseek: { apiKeyEnv: "OLD" } } },
+  user: { providers: { deepseek: { apiKeyEnv: "OLD" } } }, base: {}, revision: 4, schema: {} };
+const importOps = providerImportOperations(transferTarget, bundle,
+  { deepseek: "skip", "team-gateway": "add" });
+assert.deepEqual(importOps.map((op) => op.path), [["providers", "team-gateway"]]);
+const replacementOps = providerImportOperations(transferTarget, bundle,
+  { deepseek: "replace", "team-gateway": "add" });
+assert.equal(replacementOps.length, 2);
+assert.equal(candidate(transferTarget, replacementOps).providers.deepseek.apiKeyEnv, "DEEPSEEK_API_KEY");
+const reexported = exportProviderBundle({ value: candidate(transferTarget, replacementOps) }, ["deepseek", "team-gateway"]);
+assert.deepEqual(reexported.providers.deepseek, bundle.providers.deepseek);
+assert.deepEqual(reexported.providers["team-gateway"], bundle.providers["team-gateway"]);
+assert.throws(() => providerImportOperations(transferTarget, bundle, { deepseek: "add" }), /changed since preview/);
+assert.throws(() => providerImportOperations(transferTarget, bundle, { "team-gateway": "replace" }), /changed since preview/);
 
 console.log("config: provider/model scope, sibling preservation, validation, rejection and conflict checks passed");

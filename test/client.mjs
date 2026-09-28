@@ -21,7 +21,7 @@ const client = plugin.factory((name) => {
   assert.equal(name, "@deepseek-ai/dsh-client-ui-primitives");
   return { Modal: () => null };
 });
-assert.deepEqual(Array.from(client.inject), ["slots", "remote", "remote.settings", "remote.credentials", "remote.llm", "settingsSchema"]);
+assert.deepEqual(Array.from(client.inject), ["slots", "locale", "remote", "remote.settings", "remote.credentials", "remote.llm", "settingsSchema"]);
 
 let registration;
 const services = {
@@ -36,6 +36,13 @@ client.apply({
     register: (options, component) => { registration = { options, component }; }
   },
   effect: (callback) => callback(),
+  locale: {
+    bind: (namespace) => {
+      assert.equal(namespace, "settings.customProvider");
+      return (key) => ({ nav: "模型配置" })[key] ?? key;
+    },
+    register: () => {}
+  },
   settingsSchema: {},
   get: (name) => services[name]
 });
@@ -44,6 +51,7 @@ assert.equal(registration.options.name, "settings.section");
 assert.equal(registration.options.id, "model-configuration");
 assert.equal(registration.options.order, 11);
 assert.equal(registration.options.label(), "模型配置");
+assert.equal(registration.options.locale, "settings.customProvider");
 assert.equal(typeof registration.options.inject, "function");
 assert.equal(typeof registration.component, "function");
 const injected = registration.options.inject();

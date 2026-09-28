@@ -26,10 +26,23 @@ function host() {
   const levels = [...HOST_REASONING_LEVELS];
   let refusal;
   const fakeModelsDev = async () => ({ ok: true, json: async () => ({}) });
+  let activeLocale = "zh";
+  const dictionaries = {
+    zh: { nav: "模型配置" },
+    en: { nav: "Model configuration" }
+  };
   return {
     mutations,
     confirmations,
     levels,
+    locale: {
+      bind: (namespace) => {
+        assert.equal(namespace, "settings.customProvider");
+        return (key) => dictionaries[activeLocale][key] ?? key;
+      },
+      register: (_ns, values) => { dictionaries.zh = values.zh; dictionaries.en = values.en; },
+      setLocale: (locale) => { activeLocale = locale; }
+    },
     get view() { return view; },
     confirm(message) { confirmations.push(message); return true; },
     setProvider(route, profile) {
@@ -113,7 +126,7 @@ async function mount(t, configure = () => {}) {
   let plugin;
   vm.runInNewContext(source, {
     window: { __ModuleLoader__: { load: (entry) => { plugin = entry; } }, confirm: (...args) => fake.confirm(...args) },
-    document, navigator: { language: "zh-CN" }, console, URL, AbortController, setTimeout, clearTimeout,
+    document, navigator: { language: "zh-CN" }, console, URL, Blob, AbortController, setTimeout, clearTimeout,
     fetch: (...args) => fake.fetchModelsDev(...args)
   });
   const client = plugin.factory((name) => {
@@ -125,14 +138,14 @@ async function mount(t, configure = () => {}) {
   const effects = [];
   client.apply({
     slots: { inject: (_name, callback) => callback(), register: (options, component) => { entry = { options, component }; } },
-    effect: (callback) => effects.push(callback()), settingsSchema: fake.schema, get: (name) => fake.services[name]
+    effect: (callback) => effects.push(callback()), settingsSchema: fake.schema, locale: fake.locale, get: (name) => fake.services[name]
   });
   const container = document.createElement("main");
   document.body.append(container);
   const root = createRoot(container);
   t.after(async () => { await act(async () => root.unmount()); effects.forEach((dispose) => dispose?.()); container.remove(); });
   await act(async () => root.render(React.createElement(entry.component, entry.options.inject())));
-  return { container, fake };
+  return { container, fake, entry, root };
 }
 
 function button(container, name) {
@@ -151,6 +164,13 @@ async function input(el, value) {
 }
 async function settle() {
   for (let at = 0; at < 10; at += 1) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+}
+async function chooseTransferFile(container, value) {
+  const field = container.querySelector(".dcp-transfer-file");
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  Object.defineProperty(field, "files", { configurable: true, value: [{ size: text.length, text: async () => text }] });
+  await act(async () => field.dispatchEvent(new window.Event("change", { bubbles: true })));
+  await settle();
 }
 function modelEntry(container, modelId) {
   const row = [...container.querySelectorAll(".dcp-model-entry")]
@@ -223,142 +243,106 @@ test("custom provider discovery can be edited before creation", async (t) => {
   assert.equal(fake.view.user.providers["draft-gateway"], undefined);
 });
 
-test("the first picker adds only chosen models to the creation draft", async (t) => {
-  const { container, fake } = await mount(t, (host) => {
-    host.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
-      { id: "model-a", name: "Model A" }, { id: "model-b", name: "Model B" }
-    ] });
-  });
-  await click(button(container, "添加模型供应商"));
-  await click(button(container, "自定义模型 API"));
-  await input(container.querySelector("#dcp-create-route"), "draft-gateway");
-  await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
-  await click(button(container, "获取可用模型"));
-  await settle();
-  const picker = container.querySelector('.dcp-model-picker[role="dialog"]');
-  assert.ok(picker, "first discovery uses the shared dialog");
-  assert.equal(button(picker, "添加所选 (0)").disabled, true);
-  assert.equal(container.querySelector(".dcp-add-card .dcp-model-entry"), null);
-  await click(picker.querySelector('[aria-label="选择模型 model-a"]'));
-  await click(button(picker, "添加所选 (1)"));
-  assert.equal(fake.mutations.length, 0, "picker confirmation only updates the local draft");
-  assert.deepEqual([...container.querySelectorAll(".dcp-add-card .dcp-model-entry .dcp-provider-route")].map((el) => el.textContent), ["model-a"]);
-  await click(button(container, "获取可用模型"));
-  await settle();
-  const second = container.querySelector(".dcp-model-picker");
-  assert.equal(second.querySelector('[aria-label="选择模型 model-a"]'), null);
-  assert.equal(second.querySelector('[aria-label="选择模型 model-b"]').checked, false);
-  await click(second.querySelector('[aria-label="选择模型 model-b"]'));
-  await click(button(second, "取消"));
-  assert.equal(fake.mutations.length, 0);
-  await click(button(container, "获取可用模型"));
-  await settle();
-  const third = container.querySelector(".dcp-model-picker");
-  assert.equal(third.querySelector('[aria-label="选择模型 model-a"]'), null);
-  await click(third.querySelector('[aria-label="选择模型 model-b"]'));
-  await click(button(third, "添加所选 (1)"));
-  assert.equal(fake.mutations.length, 0, "another confirmed batch still only updates the draft");
-  await click(button(container, "添加"));
-  await settle();
-  assert.deepEqual(fake.view.user.providers["draft-gateway"].models,
-    [{ id: "model-a", name: "Model A" }, { id: "model-b", name: "Model B" }]);
+test("settings section follows the host locale dictionary", async (t) => {
+  const { container, fake, entry, root } = await mount(t);
+  assert.equal(entry.options.label(), "模型配置");
+  assert.match(container.textContent, /模型配置/);
+  fake.locale.setLocale("en");
+  await act(async () => root.render(React.createElement(entry.component, entry.options.inject())));
+  assert.equal(entry.options.label(), "Model configuration");
 });
 
-test("a discovery error stays in the picker and can be retried", async (t) => {
-  let attempts = 0;
+test("bulk import previews additions, skips existing routes and commits selected providers once", async (t) => {
   const { container, fake } = await mount(t, (host) => {
-    host.services["remote.llm"].discoverModels = async () => ++attempts === 1
-      ? { ok: false, error: { message: "discovery offline" } }
-      : { ok: true, value: [{ id: "model-a" }] };
+    host.services["remote.credentials"].set = async () => { throw new Error("import must not store credentials"); };
   });
-  await click(button(container, "添加模型供应商"));
-  await click(button(container, "自定义模型 API"));
-  await input(container.querySelector("#dcp-create-route"), "draft-gateway");
-  await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
-  await click(button(container, "获取可用模型"));
+  const bundle = { format: "dsh-custom-provider/providers", version: 1, omittedHeaders: ["team-one"], providers: {
+    "team-one": { apiKeyEnv: "TEAM_ONE_API_KEY", api: "openai-responses", baseURL: "https://one.invalid/v1", models: [{ id: "a" }] },
+    "team-two": { api: "openai-completions", baseURL: "https://two.invalid/v1", models: [{ id: "b" }] }
+  } };
+  await click(button(container, "导入配置"));
+  await chooseTransferFile(container, bundle);
+  assert.match(container.textContent, /请求头未包含/);
+  await click(button(container, "导入所选 2 项"));
   await settle();
-  const picker = container.querySelector(".dcp-model-picker");
-  assert.match(picker.querySelector('[role="alert"]')?.textContent ?? "", /discovery offline/);
-  assert.equal(fake.mutations.length, 0);
-  await click(button(picker, "重试"));
+  assert.equal(fake.mutations.length, 1);
+  assert.deepEqual(fake.mutations[0].map((op) => op.path), [
+    ["providers", "team-one"], ["providers", "team-two"]
+  ]);
+  assert.equal(fake.view.user.providers["team-one"].apiKeyEnv, "TEAM_ONE_API_KEY");
+  assert.match(container.textContent, /重新配置缺失密钥/);
+
+  await chooseTransferFile(container, bundle);
+  assert.equal(button(container, "导入所选 0 项").disabled, true, "collisions are skipped by default");
+  const decision = container.querySelector('[aria-label="team-one 的导入方式"]');
+  await act(async () => { decision.value = "replace"; decision.dispatchEvent(new window.Event("change", { bubbles: true })); });
+  await click(button(container, "导入所选 1 项"));
   await settle();
-  assert.ok(picker.querySelector('[aria-label="选择模型 model-a"]'));
-  await click(picker.querySelector('[aria-label="选择模型 model-a"]'));
-  await click(button(picker, "添加所选 (1)"));
-  await click(button(container, "添加"));
-  await settle();
-  assert.deepEqual(fake.view.user.providers["draft-gateway"].models, [{ id: "model-a" }]);
+  assert.equal(fake.mutations.length, 2);
+  assert.deepEqual(fake.mutations[1].map((op) => op.path), [["providers", "team-one"]]);
 });
 
-test("a discovery failure can switch to manual model entry without losing the provider draft", async (t) => {
-  const { container, fake } = await mount(t, (host) => {
-    host.services["remote.llm"].discoverModels = async () => ({ ok: false, error: { message: "listing unavailable" } });
+test("bulk import rejects embedded headers and read-only settings", async (t) => {
+  const { container, fake } = await mount(t);
+  await click(button(container, "导入配置"));
+  await chooseTransferFile(container, { format: "dsh-custom-provider/providers", version: 1, omittedHeaders: [],
+    providers: { unsafe: { headers: { Authorization: "Bearer private" } } } });
+  assert.match(container.querySelector('[role="alert"]').textContent, /embedded headers/);
+  assert.equal(fake.mutations.length, 0);
+  const { container: readonly } = await mount(t, (host) => {
+    const describe = host.services["remote.settings"].describe;
+    host.services["remote.settings"].describe = async () => {
+      const response = await describe(); response.value.writable = false; return response;
+    };
   });
-  await click(button(container, "添加模型供应商"));
-  await click(button(container, "自定义模型 API"));
-  await input(container.querySelector("#dcp-create-route"), "manual-gateway");
-  await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
-  await input(container.querySelector("#dcp-create-key"), "test-key");
-  assert.equal(container.querySelector(".dcp-add-card .dcp-form > .dcp-actions .dcp-button-primary").disabled, true);
-  await click(button(container, "获取可用模型"));
-  await settle();
-  const picker = container.querySelector(".dcp-model-picker");
-  assert.match(picker.querySelector('[role="alert"]')?.textContent ?? "", /listing unavailable/);
-  await click(button(picker, "手工添加模型"));
-  await settle();
-  const manualInput = container.querySelector("#dcp-create-manual-model");
-  assert.equal(document.activeElement, manualInput, "the failed picker hands focus to manual entry");
-  assert.equal(container.querySelector("#dcp-create-key").value, "test-key");
-  assert.equal(container.querySelector("#dcp-create-route").value, "manual-gateway");
-  await input(manualInput, "  vendor/model-v1  ");
-  assert.equal(container.querySelector(".dcp-add-card .dcp-form > .dcp-actions .dcp-button-primary").disabled, true,
-    "an uncommitted model ID cannot be silently omitted from creation");
-  await click(button(container, "添加"));
-  assert.equal(fake.mutations.length, 0, "manual entry changes only the draft");
-  assert.deepEqual([...container.querySelectorAll(".dcp-add-card .dcp-model-entry .dcp-provider-route")].map((el) => el.textContent), ["vendor/model-v1"]);
-  fake.reject("host rejected manual route");
-  await click(button(container, "添加"));
-  assert.match(container.querySelector(".dcp-add-card [role='alert']")?.textContent ?? "", /host rejected manual route/);
-  assert.equal(fake.view.user.providers["manual-gateway"], undefined);
-  assert.equal(container.querySelector("#dcp-create-key").value, "test-key");
-  assert.deepEqual([...container.querySelectorAll(".dcp-add-card .dcp-model-entry .dcp-provider-route")].map((el) => el.textContent), ["vendor/model-v1"]);
-  await click(button(container, "添加"));
-  await settle();
-  assert.deepEqual(fake.view.user.providers["manual-gateway"].models, [{ id: "vendor/model-v1" }]);
-  assert.equal((await fake.services["remote.credentials"].describe(["MANUAL_GATEWAY_API_KEY"]))
-    .value.MANUAL_GATEWAY_API_KEY.configured, true);
+  await click(button(readonly, "导入配置"));
+  assert.equal(readonly.querySelector(".dcp-transfer-file").disabled, true);
 });
 
-test("manual and discovered models share one deduplicated creation draft", async (t) => {
-  const { container, fake } = await mount(t, (host) => {
-    host.services["remote.llm"].discoverModels = async () => ({ ok: true, value: [
-      { id: "manual-id", name: "Upstream name" }, { id: "auto-id", name: "Auto model" }
-    ] });
+test("bulk export downloads user settings without custom headers", async (t) => {
+  const { container } = await mount(t);
+  await createProvider(container);
+  let captured;
+  const createObjectURL = URL.createObjectURL;
+  const anchorClick = window.HTMLAnchorElement.prototype.click;
+  URL.createObjectURL = (blob) => { captured = blob; return createObjectURL(blob); };
+  window.HTMLAnchorElement.prototype.click = function () { assert.equal(this.download, "dsh-providers.json"); };
+  t.after(() => { URL.createObjectURL = createObjectURL; window.HTMLAnchorElement.prototype.click = anchorClick; });
+  await click(button(container, "导出配置"));
+  await click(button(container, "下载 JSON"));
+  const bundle = JSON.parse(await captured.text());
+  assert.deepEqual(Object.keys(bundle.providers), ["team-gateway"]);
+  assert.equal(Object.hasOwn(bundle.providers["team-gateway"], "headers"), false);
+  assert.equal(Object.hasOwn(bundle.providers["team-gateway"], "apiKey"), false);
+});
+
+test("bulk export includes official Models configuration from the base layer but excludes built-in DeepSeek routes", async (t) => {
+  const { container } = await mount(t, (host) => {
+    host.view.base.providers = {
+      "base-gateway": { displayName: "Base Gateway", api: "openai-responses", models: [{ id: "base-model" }],
+        headers: { Authorization: "Bearer private" } },
+      "deepseek-account": { models: [{ id: "account-model" }] },
+      "deepseek-official": { models: [{ id: "official-model" }] }
+    };
+    host.view.value.providers = structuredClone(host.view.base.providers);
   });
-  await click(button(container, "添加模型供应商"));
-  await click(button(container, "自定义模型 API"));
-  await input(container.querySelector("#dcp-create-route"), "mixed-gateway");
-  await input(container.querySelector("#dcp-create-url"), "https://example.invalid/v1");
-  await click(button(container, "手工添加模型"));
-  await input(container.querySelector("#dcp-create-manual-model"), "manual-id");
-  await click(button(container, "添加"));
-  await click(button(container, "手工添加模型"));
-  await input(container.querySelector("#dcp-create-manual-model"), "manual-id");
-  await click(button(container, "添加"));
-  assert.match(container.querySelector(".dcp-add-card [role='alert']")?.textContent ?? "", /已在列表中/);
-  assert.equal(container.querySelectorAll(".dcp-add-card .dcp-model-entry").length, 1);
-  await click(button(container, "取消"));
-  await click(button(container, "获取可用模型"));
-  await settle();
-  const picker = container.querySelector(".dcp-model-picker");
-  assert.equal(picker.querySelector('[aria-label="选择模型 manual-id"]'), null);
-  await click(picker.querySelector('[aria-label="选择模型 auto-id"]'));
-  await click(button(picker, "添加所选 (1)"));
-  assert.equal(fake.mutations.length, 0);
-  await click(button(container, "添加"));
-  await settle();
-  assert.deepEqual(fake.view.user.providers["mixed-gateway"].models,
-    [{ id: "manual-id" }, { id: "auto-id", name: "Auto model" }]);
+  let captured;
+  const createObjectURL = URL.createObjectURL;
+  const anchorClick = window.HTMLAnchorElement.prototype.click;
+  URL.createObjectURL = (blob) => { captured = blob; return createObjectURL(blob); };
+  window.HTMLAnchorElement.prototype.click = function () { assert.equal(this.download, "dsh-providers.json"); };
+  t.after(() => { URL.createObjectURL = createObjectURL; window.HTMLAnchorElement.prototype.click = anchorClick; });
+  await click(button(container, "导出配置"));
+  const names = [...container.querySelectorAll(".dcp-transfer-row .dcp-transfer-name")].map((el) => el.textContent.trim());
+  assert.equal(names.length, 1);
+  assert.match(names[0], /Base Gateway/);
+  assert.doesNotMatch(container.textContent, /没有用户配置的提供方可导出/);
+  await click(button(container, "下载 JSON"));
+  const bundle = JSON.parse(await captured.text());
+  assert.deepEqual(Object.keys(bundle.providers), ["base-gateway"]);
+  assert.deepEqual(bundle.providers["base-gateway"].models, [{ id: "base-model" }]);
+  assert.deepEqual(bundle.omittedHeaders, ["base-gateway"]);
+  assert.doesNotMatch(JSON.stringify(bundle), /private/);
 });
 
 test("models.dev fills the model draft; Save model is the only commit action", async (t) => {
@@ -560,7 +544,7 @@ test("a failed key save stays missing until the retry succeeds", async (t) => {
   assert.equal(container.querySelector('[aria-label="缺少 API Key"]'), null);
 });
 
-test("repeat discovery leaves an existing model untouched and does not write", async (t) => {
+test("refresh keeps explicit user model fields above new provider and models.dev values", async (t) => {
   let returnedContext = 128000;
   const { container, fake } = await mount(t, (host) => {
     host.services["remote.llm"].discoverModels = async (_ns, request) => ({ ok: true, value: request.provider === "deepseek"
