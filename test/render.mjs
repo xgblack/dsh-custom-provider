@@ -23,6 +23,7 @@ function host() {
   const mutations = [];
   const confirmations = [];
   const storedKeys = new Set();
+  const removedKeys = [];
   const levels = [...HOST_REASONING_LEVELS];
   let refusal;
   const fakeModelsDev = async () => ({ ok: true, json: async () => ({}) });
@@ -36,6 +37,7 @@ function host() {
   return {
     mutations,
     confirmations,
+    removedKeys,
     levels,
     locale: {
       bind: (namespace) => {
@@ -53,7 +55,7 @@ function host() {
     setProvider(route, profile) {
       const user = structuredClone(view.user);
       user.providers[route] = structuredClone(profile);
-      view = { ...view, user, value: structuredClone(user), revision: view.revision + 1 };
+      view = { ...view, user, value: { ...view.value, providers: { ...view.value.providers, [route]: structuredClone(profile) } }, revision: view.revision + 1 };
     },
     reject(message) { refusal = message; },
     addExternalModel(route, model) {
@@ -97,7 +99,8 @@ function host() {
       "remote.credentials": {
         describe: async (refs) => ({ ok: true, value: Object.fromEntries(refs.map((ref) =>
           [ref, { configured: storedKeys.has(ref), writable: true }])) }),
-        set: async (ref) => { storedKeys.add(ref); return { ok: true }; }
+        set: async (ref) => { storedKeys.add(ref); return { ok: true }; },
+        unset: async (ref) => { removedKeys.push(ref); storedKeys.delete(ref); return { ok: true }; }
       },
       "remote.llm": {
         listConfigurableProviders: async () => ({ ok: true, value: [{ provider: "deepseek", displayName: "DeepSeek", settingsNs: "llm-pi-ai" }] }),
@@ -110,12 +113,13 @@ function host() {
           if (revision !== view.revision) return { ok: false, error: { code: "settings/conflict", message: "stale revision" } };
           if (refusal) { const message = refusal; refusal = undefined; return { ok: false, error: { message } }; }
           mutations.push(structuredClone(ops));
-          const user = structuredClone(view.user);
+          const user = structuredClone(view.value);
           for (const op of ops) {
             let target = user;
             for (const key of op.path.slice(0, -1)) target = target[key] ??= {};
-            if (op.op === "unset") delete target[op.path.at(-1)];
-            else target[op.path.at(-1)] = structuredClone(op.value);
+            const inherited = op.op === "unset" ? op.path.reduce((value, key) => value?.[key], view.base) : undefined;
+            if (op.op === "unset" && inherited === undefined) delete target[op.path.at(-1)];
+            else target[op.path.at(-1)] = structuredClone(inherited === undefined ? op.value : inherited);
           }
           view = { ...view, user, value: structuredClone(user), revision: view.revision + 1 };
           return { ok: true, value: structuredClone(view) };
@@ -434,6 +438,29 @@ test("bulk import previews additions, skips existing routes and commits selected
   assert.deepEqual(fake.mutations[1].map((op) => op.path), [["providers", "team-one", "models"]]);
 });
 
+test("an inherited route still defaults to skip and an explicit replacement becomes removable", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.view.base.providers = {
+      "base-gateway": { api: "openai-responses", models: [{ id: "base-model" }] }
+    };
+    host.view.value.providers = structuredClone(host.view.base.providers);
+  });
+  await click(button(container, "导入配置"));
+  await chooseTransferFile(container, { format: "dsh-custom-provider/providers", version: 1, omittedHeaders: [], providers: {
+    "base-gateway": { api: "openai-responses", models: [{ id: "imported-model", contextWindow: 128000 }] }
+  } });
+  const decision = container.querySelector('[aria-label="base-gateway 的导入方式"]');
+  assert.equal(decision.value, "skip");
+  assert.equal(button(container, "导入所选 0 项").disabled, true);
+  await act(async () => { decision.value = "replace"; decision.dispatchEvent(new window.Event("change", { bubbles: true })); });
+  assert.equal(button(container, "导入所选 1 项").disabled, false);
+  await click(button(container, "导入所选 1 项"));
+  await settle();
+  assert.equal(fake.view.user.providers["base-gateway"].models[0].id, "imported-model");
+  const card = container.querySelector(".dcp-provider-card");
+  assert.equal(button(card, "删除提供方 base-gateway").disabled, false);
+});
+
 test("bulk import actions can select only new providers", async (t) => {
   const { container, fake } = await mount(t, (host) => {
     host.setProvider("existing-gateway", { api: "openai-responses", models: [{ id: "old" }] });
@@ -561,6 +588,26 @@ test("bulk export includes official Models configuration from the base layer but
   assert.doesNotMatch(JSON.stringify(bundle), /private/);
 });
 
+test("deleting a base-only provider removes the active route and preserves every sibling setting", async (t) => {
+  const sibling = { models: [{ id: "sibling-model", contextWindow: 128000, reasoningEfforts: { off: null, high: "high" } }],
+    headers: { "X-Test": "keep-header" }, apiKeyEnv: "SHARED_KEY" };
+  const { container, fake } = await mount(t, (host) => {
+    host.view.base.providers = { "base-gateway": { models: [{ id: "base-model" }] } };
+    host.view.value.providers = structuredClone(host.view.base.providers);
+    host.setProvider("sibling-gateway", sibling);
+  });
+  const card = container.querySelector(".dcp-provider-card");
+  assert.match(card.textContent, /基础层继承/);
+  assert.equal(button(card, "删除提供方 base-gateway").disabled, false);
+  await click(button(card, "删除提供方 base-gateway"));
+  await settle();
+  assert.equal(fake.view.value.providers["base-gateway"], undefined);
+  assert.deepEqual(fake.view.value.providers["sibling-gateway"], sibling);
+  assert.equal(container.querySelectorAll(".dcp-provider-card").length, 1);
+  assert.equal(button(container, "删除提供方 sibling-gateway").disabled, false);
+  assert.deepEqual(fake.removedKeys, []);
+});
+
 test("an imported user provider is not labeled inherited when the base has the same route", async (t) => {
   const { container } = await mount(t, (host) => {
     host.setProvider("team-gateway", { api: "openai-responses", models: [{ id: "model-a" }] });
@@ -571,8 +618,7 @@ test("an imported user provider is not labeled inherited when the base has the s
   const card = container.querySelector(".dcp-provider-card");
   assert.match(card.textContent, /自定义/);
   assert.doesNotMatch(card.textContent, /组合继承/);
-  assert.equal([...card.querySelectorAll("button")].some((button) => button.textContent.trim() === "移除"), true,
-    "a user override of a base provider can be removed to restore inheritance");
+  assert.equal(button(card, "删除提供方 team-gateway").disabled, false);
 });
 
 test("removing an added provider deletes its user layer", async (t) => {
@@ -580,10 +626,81 @@ test("removing an added provider deletes its user layer", async (t) => {
     host.setProvider("imported-gateway", { api: "openai-responses", models: [{ id: "local" }] });
   });
   const card = container.querySelector(".dcp-provider-card");
-  await click([...card.querySelectorAll("button")].find((button) => button.textContent.trim() === "移除"));
+  await click(button(card, "删除提供方 imported-gateway"));
   await settle();
   assert.equal(fake.view.user.providers["imported-gateway"], undefined);
   assert.equal(container.querySelector('.dcp-provider-card'), null);
+});
+
+test("deleting a layered provider does not restore its base route or clear an inherited credential", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.view.base.providers = { "team-gateway": { apiKeyEnv: "TEAM_GATEWAY_API_KEY", models: [{ id: "base" }] } };
+    host.setProvider("team-gateway", { apiKeyEnv: "TEAM_GATEWAY_API_KEY", models: [{ id: "imported" }] });
+  });
+  await click(button(container, "删除提供方 team-gateway"));
+  await settle();
+  assert.deepEqual(fake.view.value.providers, {});
+  assert.equal(fake.view.base.providers["team-gateway"].models[0].id, "base", "the lower-layer source is left intact");
+  assert.equal(container.querySelector(".dcp-provider-card"), null);
+  assert.deepEqual(fake.removedKeys, []);
+});
+
+test("cancelling provider deletion and read-only settings prevent any write", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.setProvider("team-gateway", { models: [{ id: "local" }] });
+    host.confirm = () => false;
+  });
+  await click(button(container, "删除提供方 team-gateway"));
+  assert.equal(fake.mutations.length, 0);
+  assert.equal(fake.view.value.providers["team-gateway"].models[0].id, "local");
+  const { container: readonly, fake: readonlyFake } = await mount(t, (host) => {
+    host.setProvider("team-gateway", { models: [{ id: "local" }] });
+    const describe = host.services["remote.settings"].describe;
+    host.services["remote.settings"].describe = async () => {
+      const result = await describe(); result.value.writable = false; return result;
+    };
+  });
+  const remove = button(readonly, "删除提供方 team-gateway");
+  assert.equal(remove.disabled, true);
+  await click(remove);
+  assert.equal(readonlyFake.mutations.length, 0);
+  assert.equal(readonlyFake.confirmations.length, 0);
+});
+
+test("provider deletion failures preserve the route and its credential", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.setProvider("team-gateway", { apiKeyEnv: "TEAM_GATEWAY_API_KEY", models: [{ id: "local" }] });
+    host.reject("adapter refused deletion");
+  });
+  await click(button(container, "删除提供方 team-gateway"));
+  await settle();
+  assert.equal(fake.view.value.providers["team-gateway"].models[0].id, "local");
+  assert.match(container.querySelector('[role="alert"]').textContent, /adapter refused deletion/);
+  assert.deepEqual(fake.removedKeys, []);
+});
+
+test("a stale inherited deletion cannot overwrite a sibling edited elsewhere", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.view.base.providers = { "base-gateway": { models: [{ id: "base" }] } };
+    host.view.value.providers = structuredClone(host.view.base.providers);
+    host.setProvider("sibling-gateway", { models: [{ id: "before" }] });
+  });
+  fake.setProvider("sibling-gateway", { models: [{ id: "after" }] });
+  await click(button(container, "删除提供方 base-gateway"));
+  await settle();
+  assert.equal(fake.mutations.length, 0);
+  assert.equal(fake.view.value.providers["base-gateway"].models[0].id, "base");
+  assert.equal(fake.view.value.providers["sibling-gateway"].models[0].id, "after");
+  assert.match(container.querySelector('[role="alert"]').textContent, /配置已被其他编辑更新/);
+  assert.deepEqual(fake.removedKeys, []);
+});
+
+test("built-in DeepSeek routes never expose provider deletion", async (t) => {
+  const { container } = await mount(t, (host) => {
+    host.setProvider("deepseek-official", { models: [{ id: "official" }] });
+    host.setProvider("deepseek-account", { models: [{ id: "account" }] });
+  });
+  assert.equal(container.querySelector('[aria-label^="删除提供方"]'), null);
 });
 
 test("a declared provider model edit materializes models instead of modelOverrides", async (t) => {

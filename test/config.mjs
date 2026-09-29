@@ -195,8 +195,30 @@ assert.deepEqual(availableCatalogProviders([
   { provider: "deepseek", declared: false }, { provider: "sibling", declared: true },
   { provider: "free", declared: false }
 ], ["deepseek"]).map((entry) => entry.provider), ["free"]);
-assert.deepEqual(removeProviderOperation(providerView, "deepseek"), { op: "unset", path: ["providers", "deepseek"] });
+assert.deepEqual(removeProviderOperation(providerView, "deepseek"), {
+  op: "set", path: ["providers"], value: { sibling: providerView.value.providers.sibling }
+});
 assert.deepEqual(removeProviderOperation(providerView, "sibling"), { op: "unset", path: ["providers", "sibling"] });
+const removedProvider = candidate(providerView, removeProviderOperation(providerView, "deepseek"));
+assert.equal(Object.hasOwn(removedProvider.providers, "deepseek"), false, "deletion must not restore the inherited route");
+assert.deepEqual(removedProvider.providers.sibling, providerView.value.providers.sibling);
+const baseOnlyProvider = {
+  value: profile({ models: [{ id: "base" }] }), base: profile({ models: [{ id: "base" }] }), user: {}
+};
+assert.equal(providerRemovable(baseOnlyProvider, route), true);
+assert.deepEqual(removeProviderOperation(baseOnlyProvider, route), { op: "set", path: ["providers"], value: {} });
+assert.deepEqual(candidate(baseOnlyProvider, removeProviderOperation(baseOnlyProvider, route)).providers, {});
+assert.throws(() => removeProviderOperation(providerView, "missing"), /missing or cannot/);
+for (const id of ["deepseek-account", "deepseek-official"]) {
+  const protectedView = { value: { providers: { [id]: {} } }, user: { providers: { [id]: {} } }, base: {} };
+  assert.equal(providerRemovable(protectedView, id), false);
+  assert.throws(() => removeProviderOperation(protectedView, id), /cannot be removed/);
+}
+const redactedView = { ...providerView, secrets: [{ set: true, path: ["providers", "sibling", "secret"] }] };
+assert.throws(() => removeProviderOperation(redactedView, "deepseek"), /redacted secrets/);
+assert.deepEqual(candidate(providerView, { op: "unset", path: ["providers", "deepseek"] }).providers.deepseek,
+  providerView.base.providers.deepseek, "a normal unset restores the inherited value, unlike deletion");
+assert.equal(candidate({ value: { field: "override" }, base: { field: null } }, { op: "unset", path: ["field"] }).field, null);
 const patchProvider = patchProviderOperation(providerView, "deepseek", { displayName: "Local", baseURL: undefined });
 assert.deepEqual(patchProvider, [
   { op: "set", path: ["providers", "deepseek", "displayName"], value: "Local" },
