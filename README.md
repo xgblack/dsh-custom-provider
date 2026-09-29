@@ -107,7 +107,7 @@ The page follows the host `llm-pi-ai` schema and storage boundaries:
 - Settings writes target the real `llm-pi-ai` namespace through revisioned `remote.settings` operations.
 - Client-side schema validation runs before a mutation is sent to dsh. Host rejection and revision conflicts keep the unsaved draft visible.
 - Explicit user model lists are replaced as a preserved array so hidden fields and sibling entries survive a single-model edit.
-- Catalog model edits write only the selected `modelOverrides.<model-id>` entry. Saving an object containing only its id restores the catalog default.
+- Installed-catalog model edits write only the selected `modelOverrides.<model-id>` entry. Saving an object containing only its id restores the catalog default. A declared route not described by the installed catalog instead writes a complete `models` list; editing or importing an existing `modelOverrides` entry converts it into that list while preserving the other configured models.
 - API keys are stored through `remote.credentials`, are never read back into a form, and are not written to settings JSON. Settings contain only the configured credential reference.
 - If credential storage fails after a provider settings write, the key can be retried without creating another provider.
 

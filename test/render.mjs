@@ -552,6 +552,30 @@ test("an imported user provider is not labeled inherited when the base has the s
     "a user override of a base provider remains non-removable");
 });
 
+test("a declared provider model edit materializes models instead of modelOverrides", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.setProvider("coolstudio-llm", { api: "openai-completions", modelOverrides: {
+      "qwen3.7-plus": { contextWindow: 128000 }
+    } });
+    host.services["remote.llm"].listConfigurableProviders = async () => ({ ok: true, value: [
+      { provider: "deepseek", displayName: "DeepSeek", settingsNs: "llm-pi-ai" },
+      { provider: "coolstudio-llm", displayName: "酷得 LLM", settingsNs: "llm-pi-ai", declared: true }
+    ] });
+  });
+  await click(button(container, "编辑"));
+  await click(button(container, "展开模型 qwen3.7-plus"));
+  await input(container.querySelector('.dcp-model-advanced input[id$="-context"]'), "256K");
+  await click(button(container, "保存模型"));
+  await settle();
+  const operations = fake.mutations.at(-1);
+  assert.deepEqual(operations.map(({ op, path }) => ({ op, path })), [
+    { op: "set", path: ["providers", "coolstudio-llm", "models"] },
+    { op: "unset", path: ["providers", "coolstudio-llm", "modelOverrides"] }
+  ]);
+  assert.equal(fake.view.user.providers["coolstudio-llm"].modelOverrides, undefined);
+  assert.equal(fake.view.user.providers["coolstudio-llm"].models[0].contextWindow, 256000);
+});
+
 test("models.dev fills the model draft; Save model is the only commit action", async (t) => {
   let fetchCount = 0;
   const { container, fake } = await mount(t, (host) => {

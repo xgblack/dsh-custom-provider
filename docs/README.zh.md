@@ -107,7 +107,7 @@ bundle patch 已经注册一次插件，不要再添加相同 id 的 `dsh-custom
 - 设置写入真实的 `llm-pi-ai` 命名空间，并通过带 revision 的 `remote.settings` 操作提交。
 - 提交前执行客户端 schema 校验；宿主拒绝或 revision 冲突时保留未保存草稿。
 - 用户显式配置的模型列表会作为保留其他字段和同级模型的完整数组提交。
-- 目录模型只写当前的 `modelOverrides.<模型 ID>`；只保存包含 ID 的对象即可恢复目录默认值。
+- 已安装目录模型只写当前的 `modelOverrides.<模型 ID>`；只保存包含 ID 的对象即可恢复目录默认值。未被安装目录描述的声明路由改写完整的 `models` 列表；编辑或导入已有 `modelOverrides` 时会转换为该列表，并保留同路由其他已配置模型。
 - API Key 通过 `remote.credentials` 保存，不回显、不写入设置 JSON；设置中只保存凭据引用名。
 - 如果提供方设置写入成功但凭据保存失败，可以重试密钥，不会重复创建提供方。
 

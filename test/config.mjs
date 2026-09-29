@@ -94,6 +94,51 @@ const catalog = {
   schema: {}
 };
 assert.equal(modelMode(catalog, route), "catalog");
+const declared = [{ provider: "coolstudio-llm", declared: true }];
+const external = {
+  value: { providers: { "coolstudio-llm": { api: "openai-completions", models: [
+    { id: "qwen3.7-plus", name: "Qwen", contextWindow: 128000 }, { id: "other", maxTokens: 4096 }
+  ] } } },
+  user: { providers: { "coolstudio-llm": { displayName: "Gateway" } } },
+  base: {}
+};
+assert.equal(modelMode(external, "coolstudio-llm", declared), "declared");
+const declaredEdit = patchModelOperation(external, "coolstudio-llm", "qwen3.7-plus", { maxTokens: 8192 }, declared);
+assert.deepEqual(declaredEdit, [{ op: "set", path: ["providers", "coolstudio-llm", "models"], value: [
+  { id: "qwen3.7-plus", name: "Qwen", contextWindow: 128000, maxTokens: 8192 },
+  { id: "other", maxTokens: 4096 }
+] }]);
+assert.equal(candidate(external, declaredEdit).providers["coolstudio-llm"].modelOverrides, undefined);
+const brokenDeclared = { ...external,
+  user: { providers: { "coolstudio-llm": { modelOverrides: {
+    "qwen3.7-plus": { maxTokens: 2048 }, other: { contextWindow: 64000 }
+  } } } },
+  value: { providers: { "coolstudio-llm": { models: external.value.providers["coolstudio-llm"].models,
+    modelOverrides: { "qwen3.7-plus": { maxTokens: 2048 }, other: { contextWindow: 64000 } } } } }
+};
+const repaired = patchModelOperation(brokenDeclared, "coolstudio-llm", "qwen3.7-plus", { maxTokens: 8192 }, declared);
+assert.deepEqual(repaired.map(({ op, path }) => ({ op, path })), [
+  { op: "set", path: ["providers", "coolstudio-llm", "models"] },
+  { op: "unset", path: ["providers", "coolstudio-llm", "modelOverrides"] }
+]);
+assert.equal(candidate(brokenDeclared, repaired).providers["coolstudio-llm"].modelOverrides, undefined);
+assert.deepEqual(repaired[0].value[1], { id: "other", maxTokens: 4096, contextWindow: 64000 },
+  "repair retains overrides on other models");
+const unresolvedDeclared = {
+  value: { providers: { "coolstudio-llm": { api: "openai-completions", modelOverrides: {
+    "qwen3.7-plus": { contextWindow: 128000 }
+  } } } },
+  user: { providers: { "coolstudio-llm": { modelOverrides: {
+    "qwen3.7-plus": { contextWindow: 128000 }
+  } } } },
+  base: {}
+};
+assert.deepEqual(patchModelOperation(unresolvedDeclared, "coolstudio-llm", "qwen3.7-plus", { maxTokens: 8192 }, declared), [
+  { op: "set", path: ["providers", "coolstudio-llm", "models"], value: [
+    { id: "qwen3.7-plus", contextWindow: 128000, maxTokens: 8192 }
+  ] },
+  { op: "unset", path: ["providers", "coolstudio-llm", "modelOverrides"] }
+]);
 assert.deepEqual(editableModel(catalog, route, "builtin"), { id: "builtin", maxTokens: 8000 },
   "advanced JSON is limited to the current model user scope");
 assert.deepEqual(effectiveModel(catalog, route, "builtin", {
@@ -241,6 +286,17 @@ const legacyBundle = exportProviderBundle({ value: { providers: { Legacy_ID: { m
 assert.deepEqual(Object.keys(parseProviderBundle(JSON.stringify(legacyBundle)).providers), ["Legacy_ID"]);
 const inheritedBundle = exportProviderBundle(transferSource, ["inherited"]);
 assert.deepEqual(inheritedBundle.providers.inherited.models, [{ id: "hidden" }]);
+const declaredBundle = { format: "dsh-custom-provider/providers", version: 1, omittedHeaders: [], providers: {
+  "coolstudio-llm": { api: "openai-completions", modelOverrides: {
+    "qwen3.7-plus": { maxTokens: 8192 }
+  } }
+} };
+const declaredImport = providerImportOperations(external, declaredBundle, { "coolstudio-llm": "replace" }, declared);
+assert.deepEqual(declaredImport[0].value.models, [
+  { id: "qwen3.7-plus", name: "Qwen", contextWindow: 128000, maxTokens: 8192 },
+  { id: "other", maxTokens: 4096 }
+]);
+assert.equal(Object.hasOwn(declaredImport[0].value, "modelOverrides"), false);
 const composedSource = {
   base: { providers: { "official-page": { api: "openai-responses", models: [{ id: "base-model" }], headers: { Authorization: "Bearer private" } } } },
   user: { providers: { "official-page": { displayName: "Configured in Models" } } },
