@@ -75,7 +75,7 @@ Custom providers must use an explicit protocol. **Inherit catalog** is available
 
 - Add installed catalog providers or define custom routes with an id, display name, endpoint, and protocol.
 - Edit display name, endpoint, and protocol for writable provider fields.
-- Remove user-created providers. Providers inherited from the profile composition cannot be removed from this page.
+- Remove providers with user-layer configuration. If the same route also exists in the profile composition, removal deletes only the user-layer override and restores the inherited provider.
 - Fetch and filter models using the adapter-owned `remote.llm` service. Recognizable official model IDs use installed pi-ai catalog metadata ahead of the provider response.
 - For explicit model lists, both initial and repeat discovery use a model-selection dialog with nothing selected by default. Initial selection only updates the provider draft; on repeat discovery, only selected IDs not yet saved are appended. Fetching or cancelling never writes settings, and existing model entries remain unchanged. Catalog providers without an explicit list continue to refresh their displayed catalog.
 - A custom provider can be created with manually entered model IDs when its endpoint cannot list models. At least one model is required; manual entries and selected discovery results share the same draft without replacing each other. An ID-only model uses the host defaults (text input, 256K context, 32K output), not verified upstream limits; adjust its fields after creation if needed.

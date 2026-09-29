@@ -175,7 +175,7 @@ const providerView = {
   revision: 12, schema: {}
 };
 assert.equal(derivedKeyRef("my-gateway"), "MY_GATEWAY_API_KEY");
-assert.equal(providerRemovable(providerView, "deepseek"), false);
+assert.equal(providerRemovable(providerView, "deepseek"), true);
 assert.equal(providerRemovable(providerView, "sibling"), true);
 assert.equal(providerKind(providerView, "deepseek", [{ provider: "deepseek", declared: false }]), "catalog");
 assert.equal(providerKind(providerView, "sibling", [{ provider: "sibling", declared: true }]), "custom");
@@ -195,7 +195,7 @@ assert.deepEqual(availableCatalogProviders([
   { provider: "deepseek", declared: false }, { provider: "sibling", declared: true },
   { provider: "free", declared: false }
 ], ["deepseek"]).map((entry) => entry.provider), ["free"]);
-assert.throws(() => removeProviderOperation(providerView, "deepseek"), /Inherited providers/);
+assert.deepEqual(removeProviderOperation(providerView, "deepseek"), { op: "unset", path: ["providers", "deepseek"] });
 assert.deepEqual(removeProviderOperation(providerView, "sibling"), { op: "unset", path: ["providers", "sibling"] });
 const patchProvider = patchProviderOperation(providerView, "deepseek", { displayName: "Local", baseURL: undefined });
 assert.deepEqual(patchProvider, [

@@ -571,8 +571,19 @@ test("an imported user provider is not labeled inherited when the base has the s
   const card = container.querySelector(".dcp-provider-card");
   assert.match(card.textContent, /自定义/);
   assert.doesNotMatch(card.textContent, /组合继承/);
-  assert.equal([...card.querySelectorAll("button")].some((button) => button.textContent.trim() === "移除"), false,
-    "a user override of a base provider remains non-removable");
+  assert.equal([...card.querySelectorAll("button")].some((button) => button.textContent.trim() === "移除"), true,
+    "a user override of a base provider can be removed to restore inheritance");
+});
+
+test("removing an added provider deletes its user layer", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.setProvider("imported-gateway", { api: "openai-responses", models: [{ id: "local" }] });
+  });
+  const card = container.querySelector(".dcp-provider-card");
+  await click([...card.querySelectorAll("button")].find((button) => button.textContent.trim() === "移除"));
+  await settle();
+  assert.equal(fake.view.user.providers["imported-gateway"], undefined);
+  assert.equal(container.querySelector('.dcp-provider-card'), null);
 });
 
 test("a declared provider model edit materializes models instead of modelOverrides", async (t) => {
