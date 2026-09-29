@@ -597,7 +597,7 @@ test("deleting a base-only provider removes the active route and preserves every
     host.setProvider("sibling-gateway", sibling);
   });
   const card = container.querySelector(".dcp-provider-card");
-  assert.match(card.textContent, /基础层继承/);
+  assert.equal(card.querySelector(".dcp-provider-identity").textContent, "base-gateway");
   assert.equal(button(card, "删除提供方 base-gateway").disabled, false);
   await click(button(card, "删除提供方 base-gateway"));
   await settle();
@@ -608,7 +608,7 @@ test("deleting a base-only provider removes the active route and preserves every
   assert.deepEqual(fake.removedKeys, []);
 });
 
-test("an imported user provider is not labeled inherited when the base has the same route", async (t) => {
+test("provider cards show only provider identity when user and base share the route", async (t) => {
   const { container } = await mount(t, (host) => {
     host.setProvider("team-gateway", { api: "openai-responses", models: [{ id: "model-a" }] });
     host.view.base.providers = {
@@ -616,8 +616,7 @@ test("an imported user provider is not labeled inherited when the base has the s
     };
   });
   const card = container.querySelector(".dcp-provider-card");
-  assert.match(card.textContent, /自定义/);
-  assert.doesNotMatch(card.textContent, /组合继承/);
+  assert.equal(card.querySelector(".dcp-provider-identity").textContent, "team-gateway");
   assert.equal(button(card, "删除提供方 team-gateway").disabled, false);
 });
 
