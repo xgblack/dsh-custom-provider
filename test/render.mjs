@@ -420,19 +420,40 @@ test("bulk import previews additions, skips existing routes and commits selected
   assert.equal(fake.view.user.providers["team-one"].apiKeyEnv, "TEAM_ONE_API_KEY");
   assert.match(container.textContent, /重新配置缺失密钥/);
 
-  await chooseTransferFile(container, bundle);
+  const replacementBundle = { ...bundle, providers: {
+    ...bundle.providers,
+    "team-one": { ...bundle.providers["team-one"], models: [{ id: "a", contextWindow: 128000 }] }
+  } };
+  await chooseTransferFile(container, replacementBundle);
   assert.equal(button(container, "导入所选 0 项").disabled, true, "collisions are skipped by default");
   const decision = container.querySelector('[aria-label="team-one 的导入方式"]');
   await act(async () => { decision.value = "replace"; decision.dispatchEvent(new window.Event("change", { bubbles: true })); });
   await click(button(container, "导入所选 1 项"));
   await settle();
   assert.equal(fake.mutations.length, 2);
-  assert.deepEqual(fake.mutations[1].map((op) => op.path), [["providers", "team-one"]]);
+  assert.deepEqual(fake.mutations[1].map((op) => op.path), [["providers", "team-one", "models"]]);
+});
+
+test("bulk import actions can select only new providers", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.setProvider("existing-gateway", { api: "openai-responses", models: [{ id: "old" }] });
+  });
+  await click(button(container, "导入配置"));
+  await chooseTransferFile(container, { format: "dsh-custom-provider/providers", version: 1, omittedHeaders: [], providers: {
+    "existing-gateway": { api: "openai-responses", models: [{ id: "new-source" }] },
+    "new-gateway": { api: "openai-responses", models: [{ id: "new" }] }
+  } });
+  await click(button(container, "仅导入新增"));
+  assert.equal(button(container, "导入所选 1 项").disabled, false);
+  await click(button(container, "导入所选 1 项"));
+  await settle();
+  assert.deepEqual(fake.mutations.at(-1).map((op) => op.path), [["providers", "new-gateway"]]);
+  assert.deepEqual(fake.view.user.providers["existing-gateway"].models, [{ id: "old" }]);
 });
 
 test("an existing provider is skipped until replaced, then imported model settings appear", async (t) => {
   const { container, fake } = await mount(t, (host) => {
-    host.setProvider("team-gateway", { api: "openai-responses", models: [{ id: "model-a" }] });
+    host.setProvider("team-gateway", { api: "openai-responses", headers: { Authorization: "Bearer target" }, models: [{ id: "model-a" }] });
   });
   const bundle = { format: "dsh-custom-provider/providers", version: 1, omittedHeaders: [], providers: {
     "team-gateway": { api: "openai-responses", models: [{ id: "model-a", contextWindow: 128000,
@@ -448,6 +469,8 @@ test("an existing provider is skipped until replaced, then imported model settin
   await click(button(container, "导入所选 1 项"));
   await settle();
   assert.deepEqual(fake.view.user.providers["team-gateway"].models[0], bundle.providers["team-gateway"].models[0]);
+  assert.deepEqual(fake.view.user.providers["team-gateway"].headers, { Authorization: "Bearer target" },
+    "replace keeps destination headers because headers are excluded from transfers");
   await click(button(container, "编辑"));
   await click(button(container, "展开模型 model-a"));
   const row = modelEntry(container, "model-a");

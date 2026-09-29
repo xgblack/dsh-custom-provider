@@ -21,7 +21,9 @@ import {
   removeModelOperation,
   removeProviderOperation,
   replaceProviderOperation,
-  replaceModelOperation
+  replaceModelOperation,
+  providerTransferDiff,
+  providerTransferState
 } from "../lib/config.js";
 
 const route = "deepseek";
@@ -292,11 +294,12 @@ const declaredBundle = { format: "dsh-custom-provider/providers", version: 1, om
   } }
 } };
 const declaredImport = providerImportOperations(external, declaredBundle, { "coolstudio-llm": "replace" }, declared);
-assert.deepEqual(declaredImport[0].value.models, [
+const declaredCandidate = candidate(external, declaredImport);
+assert.deepEqual(declaredCandidate.providers["coolstudio-llm"].models, [
   { id: "qwen3.7-plus", name: "Qwen", contextWindow: 128000, maxTokens: 8192 },
   { id: "other", maxTokens: 4096 }
 ]);
-assert.equal(Object.hasOwn(declaredImport[0].value, "modelOverrides"), false);
+assert.equal(Object.hasOwn(declaredCandidate.providers["coolstudio-llm"], "modelOverrides"), false);
 const composedSource = {
   base: { providers: { "official-page": { api: "openai-responses", models: [{ id: "base-model" }], headers: { Authorization: "Bearer private" } } } },
   user: { providers: { "official-page": { displayName: "Configured in Models" } } },
@@ -320,6 +323,11 @@ assert.throws(() => parseProviderBundle("{"), /Invalid JSON/);
 assert.throws(() => parseProviderBundle(JSON.stringify({ ...bundle, version: 2 })), /Unsupported/);
 assert.throws(() => parseProviderBundle(JSON.stringify({ ...bundle, providers: { bad: { headers: { Authorization: "secret" } } } })), /embedded headers/);
 assert.throws(() => parseProviderBundle('{"format":"dsh-custom-provider/providers","version":1,"providers":{"__proto__":{}},"omittedHeaders":[]}'), /invalid ID/);
+assert.throws(() => parseProviderBundle(JSON.stringify({ ...bundle, providers: { "deepseek-official": {} } })), /invalid ID/);
+assert.throws(() => parseProviderBundle(JSON.stringify({ ...bundle, providers: { "deepseek-account": {} } })), /invalid ID/);
+const secretExport = exportProviderBundle({ value: { providers: { secret: { apiKey: "private", models: [{ id: "a" }] } } } }, ["secret"]);
+assert.equal(Object.hasOwn(secretExport.providers.secret, "apiKey"), false);
+assert.throws(() => parseProviderBundle(JSON.stringify({ ...bundle, providers: { secret: { apiKey: "private" } } })), /invalid ID/);
 
 const transferTarget = { value: { providers: { deepseek: { apiKeyEnv: "OLD" } } },
   user: { providers: { deepseek: { apiKeyEnv: "OLD" } } }, base: {}, revision: 4, schema: {} };
@@ -328,12 +336,35 @@ const importOps = providerImportOperations(transferTarget, bundle,
 assert.deepEqual(importOps.map((op) => op.path), [["providers", "team-gateway"]]);
 const replacementOps = providerImportOperations(transferTarget, bundle,
   { deepseek: "replace", "team-gateway": "add" });
-assert.equal(replacementOps.length, 2);
+assert.deepEqual(replacementOps.map(({ path }) => path), [
+  ["providers", "deepseek", "apiKeyEnv"], ["providers", "deepseek", "modelOverrides"],
+  ["providers", "team-gateway"]
+]);
 assert.equal(candidate(transferTarget, replacementOps).providers.deepseek.apiKeyEnv, "DEEPSEEK_API_KEY");
 const reexported = exportProviderBundle({ value: candidate(transferTarget, replacementOps) }, ["deepseek", "team-gateway"]);
 assert.deepEqual(reexported.providers.deepseek, bundle.providers.deepseek);
 assert.deepEqual(reexported.providers["team-gateway"], bundle.providers["team-gateway"]);
 assert.throws(() => providerImportOperations(transferTarget, bundle, { deepseek: "add" }), /changed since preview/);
 assert.throws(() => providerImportOperations(transferTarget, bundle, { "team-gateway": "replace" }), /changed since preview/);
+
+const headerTarget = {
+  value: { providers: { gateway: { api: "openai-responses", headers: { Authorization: "Bearer target" }, models: [{ id: "local" }] } } },
+  user: { providers: { gateway: { api: "openai-responses", headers: { Authorization: "Bearer target" }, models: [{ id: "local" }] } } },
+  base: {}, revision: 5, schema: {}
+};
+const headerBundle = { format: "dsh-custom-provider/providers", version: 1, omittedHeaders: ["gateway"], providers: {
+  gateway: { api: "openai-completions", models: [{ id: "source", contextWindow: 128000 }] }
+} };
+assert.equal(providerTransferState(headerTarget, "gateway"), "user");
+assert.deepEqual(providerTransferDiff(headerTarget, "gateway", headerBundle.providers.gateway).changedFields,
+  ["api", "models"]);
+const headerOps = providerImportOperations(headerTarget, headerBundle, { gateway: "replace" });
+assert.deepEqual(headerOps.map(({ path }) => path), [
+  ["providers", "gateway", "api"], ["providers", "gateway", "models"]
+]);
+assert.deepEqual(candidate(headerTarget, headerOps).providers.gateway, {
+  api: "openai-completions", headers: { Authorization: "Bearer target" },
+  models: [{ id: "source", contextWindow: 128000 }]
+});
 
 console.log("config: provider/model scope, sibling preservation, validation, rejection and conflict checks passed");
