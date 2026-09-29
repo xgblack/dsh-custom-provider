@@ -132,7 +132,18 @@ assert.equal(providerRemovable(providerView, "deepseek"), false);
 assert.equal(providerRemovable(providerView, "sibling"), true);
 assert.equal(providerKind(providerView, "deepseek", [{ provider: "deepseek", declared: false }]), "catalog");
 assert.equal(providerKind(providerView, "sibling", [{ provider: "sibling", declared: true }]), "custom");
-assert.equal(providerKind(providerView, "deepseek", []), "inherited");
+assert.equal(providerKind(providerView, "deepseek", []), "custom");
+assert.equal(providerKind({
+  value: { providers: { inherited: { models: [{ id: "base" }] } } },
+  user: { providers: {} },
+  base: { providers: { inherited: { models: [{ id: "base" }] } } }
+}, "inherited", []), "inherited");
+assert.equal(providerKind({
+  value: { providers: { imported: { models: [{ id: "a" }] } } },
+  user: { providers: { imported: { models: [{ id: "a" }] } } },
+  base: { providers: { imported: { models: [{ id: "a" }] } } }
+}, "imported", [{ provider: "imported", declared: true }]), "custom",
+  "a user import remains custom even when the profile also has an inherited base route");
 assert.deepEqual(availableCatalogProviders([
   { provider: "deepseek", declared: false }, { provider: "sibling", declared: true },
   { provider: "free", declared: false }

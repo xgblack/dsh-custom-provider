@@ -430,6 +430,51 @@ test("bulk import previews additions, skips existing routes and commits selected
   assert.deepEqual(fake.mutations[1].map((op) => op.path), [["providers", "team-one"]]);
 });
 
+test("an existing provider is skipped until replaced, then imported model settings appear", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.setProvider("team-gateway", { api: "openai-responses", models: [{ id: "model-a" }] });
+  });
+  const bundle = { format: "dsh-custom-provider/providers", version: 1, omittedHeaders: [], providers: {
+    "team-gateway": { api: "openai-responses", models: [{ id: "model-a", contextWindow: 128000,
+      maxTokens: 8192, reasoningEfforts: { off: null, high: "high" } }] }
+  } };
+  await click(button(container, "导入配置"));
+  await chooseTransferFile(container, bundle);
+  assert.equal(button(container, "导入所选 0 项").disabled, true);
+  assert.match(container.textContent, /已跳过 1 个已存在的提供方.*模型参数不会更新/);
+  assert.equal(fake.view.user.providers["team-gateway"].models[0].contextWindow, undefined);
+  const decision = container.querySelector('[aria-label="team-gateway 的导入方式"]');
+  await act(async () => { decision.value = "replace"; decision.dispatchEvent(new window.Event("change", { bubbles: true })); });
+  await click(button(container, "导入所选 1 项"));
+  await settle();
+  assert.deepEqual(fake.view.user.providers["team-gateway"].models[0], bundle.providers["team-gateway"].models[0]);
+  await click(button(container, "编辑"));
+  await click(button(container, "展开模型 model-a"));
+  const row = modelEntry(container, "model-a");
+  assert.equal(row.querySelector('input[aria-label="推理等级 high 的请求值"]').value, "high");
+  assert.equal(row.querySelector('.dcp-model-advanced input[id$="-context"]').value, "128K");
+  assert.equal(row.querySelector('.dcp-model-advanced input[id$="-output"]').value, "8192");
+});
+
+test("a new provider import preserves explicit model context and reasoning settings", async (t) => {
+  const { container, fake } = await mount(t);
+  const model = { id: "model-a", contextWindow: 128000, maxTokens: 8192,
+    reasoningEfforts: { off: null, high: "high" } };
+  await click(button(container, "导入配置"));
+  await chooseTransferFile(container, { format: "dsh-custom-provider/providers", version: 1, omittedHeaders: [],
+    providers: { "new-gateway": { api: "openai-responses", models: [model] } } });
+  assert.equal(button(container, "导入所选 1 项").disabled, false);
+  await click(button(container, "导入所选 1 项"));
+  await settle();
+  assert.deepEqual(fake.view.user.providers["new-gateway"].models[0], model);
+  await click(button(container, "编辑"));
+  await click(button(container, "展开模型 model-a"));
+  const row = modelEntry(container, "model-a");
+  assert.equal(row.querySelector('.dcp-model-advanced input[id$="-context"]').value, "128K");
+  assert.equal(row.querySelector('.dcp-model-advanced input[id$="-output"]').value, "8192");
+  assert.equal(row.querySelector('input[aria-label="推理等级 high 的请求值"]').value, "high");
+});
+
 test("bulk import rejects embedded headers and read-only settings", async (t) => {
   const { container, fake } = await mount(t);
   await click(button(container, "导入配置"));
@@ -491,6 +536,20 @@ test("bulk export includes official Models configuration from the base layer but
   assert.deepEqual(bundle.providers["base-gateway"].models, [{ id: "base-model" }]);
   assert.deepEqual(bundle.omittedHeaders, ["base-gateway"]);
   assert.doesNotMatch(JSON.stringify(bundle), /private/);
+});
+
+test("an imported user provider is not labeled inherited when the base has the same route", async (t) => {
+  const { container } = await mount(t, (host) => {
+    host.setProvider("team-gateway", { api: "openai-responses", models: [{ id: "model-a" }] });
+    host.view.base.providers = {
+      "team-gateway": { api: "openai-responses", models: [{ id: "base-model" }] }
+    };
+  });
+  const card = container.querySelector(".dcp-provider-card");
+  assert.match(card.textContent, /自定义/);
+  assert.doesNotMatch(card.textContent, /组合继承/);
+  assert.equal([...card.querySelectorAll("button")].some((button) => button.textContent.trim() === "移除"), false,
+    "a user override of a base provider remains non-removable");
 });
 
 test("models.dev fills the model draft; Save model is the only commit action", async (t) => {
