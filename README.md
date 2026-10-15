@@ -30,7 +30,7 @@ Edit one model's capabilities and JSON without replacing its siblings:
 
 ## Requirements
 
-- A dsh installation with the **Web Settings** surface enabled.
+- dsh **0.2.1-alpha.3 or newer in the 0.2.x series**, with the **Web Settings** surface enabled.
 - The built-in `llm-pi-ai` plugin enabled in the same dsh profile.
 
 This package does not provide an LLM adapter, gateway route, or credential backend. It only manages the existing `llm-pi-ai` settings and remotes.
@@ -104,7 +104,9 @@ Use **Import configuration** to review the file before writing. Existing routes 
 
 The page follows the host `llm-pi-ai` schema and storage boundaries:
 
-- Settings writes target the real `llm-pi-ai` namespace through revisioned `remote.settings` operations.
+- Settings writes target the real `llm-pi-ai` namespace through revisioned `remote.settings` operations. Import and edit update provider/model values; neither registers another adapter.
+- Before reading or saving, the host companion checks that `llm-pi-ai` is registered once. A redundant profile `insert` of the built-in adapter is converted into a top-level id-targeted config override, preserving its complete effective model settings and unrelated plugin entries. Repair uses the host reload queue, file lock and atomic write; it first saves a private `cordis.patch.yml.before-provider-registration-*.bak` beside the active profile patch and restores the original if reload fails.
+- Home/command-line adapter overrides, custom activation options and conflicts that cannot be repaired without changing other entries are blocked rather than silently overwritten. The page explains the conflict and leaves settings read-only; an interrupted save retains its draft. If registration is repaired while a draft is open, reload/review the current configuration before retrying. Other tools can still write conflicting patches; this plugin does not control those writers.
 - Client-side schema validation runs before a mutation is sent to dsh. Host rejection and revision conflicts keep the unsaved draft visible.
 - Explicit user model lists are replaced as a preserved array so hidden fields and sibling entries survive a single-model edit.
 - Installed-catalog model edits write only the selected `modelOverrides.<model-id>` entry. Saving an object containing only its id restores the catalog default. A declared route not described by the installed catalog instead writes a complete `models` list; editing or importing an existing `modelOverrides` entry converts it into that list while preserving the other configured models.
@@ -129,7 +131,7 @@ preview_home="$(mktemp -d "${TMPDIR:-/tmp}/dsh-custom-provider.XXXXXX")"
 DSH_HOME="$preview_home" dsh --profile web --patch "$PWD/test/local.patch.yml" --no-open --port 0
 ```
 
-`lib/client.js` is generated from `lib/client.source.js`, `lib/config.js`, and `lib/modelsdev.js`, then committed because dsh loads it directly.
+`lib/client.js` is generated from `lib/client.source.js`, `lib/config.js`, `lib/modelsdev.js`, and `lib/registration-wire.js`, then committed because dsh loads it directly.
 
 ## Scope and limitations
 

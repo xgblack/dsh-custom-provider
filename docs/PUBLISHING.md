@@ -17,7 +17,7 @@ npm whoami --registry=https://registry.npmjs.org/
 
 # 2. 发布前检查
 npm test                # prepack 会重建 lib/client.js
-npm pack --dry-run      # 期望只有 index.js、lib/client.js、cordis.patch.yml、package.json、README.md、LICENSE 与 docs/
+npm pack --dry-run      # 期望包含 index.js、lib/client.js、lib/profile-registration.js、lib/registration-guard.js、lib/registration-wire.js、cordis.patch.yml、package.json、README.md、LICENSE 与 docs/
 npm publish --dry-run   # 期望 Publishing to https://registry.npmjs.org/
 
 # 3. 发布

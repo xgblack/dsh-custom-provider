@@ -24,6 +24,8 @@ function host() {
   const confirmations = [];
   const storedKeys = new Set();
   const removedKeys = [];
+  const registration = { repaired: false };
+  const registrationCalls = [];
   const levels = [...HOST_REASONING_LEVELS];
   let refusal;
   const fakeModelsDev = async () => ({ ok: true, json: async () => ({}) });
@@ -38,6 +40,8 @@ function host() {
     mutations,
     confirmations,
     removedKeys,
+    registration,
+    registrationCalls,
     levels,
     locale: {
       bind: (namespace) => {
@@ -95,7 +99,15 @@ function host() {
         : { type: "union", list: [{ value: "openai-completions" }, { value: "openai-responses" }] }
     },
     services: {
-      remote: { $on: () => () => {} },
+      remote: { $on: () => () => {}, $mount: async () => {} },
+      "remote.customProviderRegistration": {
+        prepare: async () => {
+          registrationCalls.push(true);
+          const value = structuredClone(registration);
+          registration.repaired = false;
+          return { ok: true, value };
+        }
+      },
       "remote.credentials": {
         describe: async (refs) => ({ ok: true, value: Object.fromEntries(refs.map((ref) =>
           [ref, { configured: storedKeys.has(ref), writable: true }])) }),
@@ -1238,4 +1250,46 @@ test("the JSON editor still defers to the host schema for unknown levels", async
   await settle();
   assert.equal(fake.mutations.length, writes, "an unknown level never reaches the settings store");
   assert.match(row.querySelector('[role="alert"]').textContent, /unexpected key "ultra"/, "the host schema, not the form, is what refuses this");
+});
+
+
+test("a repaired adapter registration is reported and subsequent model edits update the imported model", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.registration.repaired = true;
+    host.setProvider("team-gateway", { models: [{ id: "imported-model", name: "Imported", maxTokens: 2048 }] });
+  });
+  assert.match(container.textContent, /已修复重复的模型适配器注册/);
+  await click(button(container, "编辑"));
+  await input(container.querySelector('input[value="Imported"]'), "Edited");
+  await click(button(container, "保存模型"));
+  assert.equal(fake.view.value.providers["team-gateway"].models.length, 1);
+  assert.equal(fake.view.value.providers["team-gateway"].models[0].name, "Edited");
+  assert.ok(fake.registrationCalls.length >= 2, "registration is checked both when loading and before saving");
+});
+
+test("an external registration conflict keeps the loaded provider visible and prevents writes", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.registration.blocked = "A home patch controls llm-pi-ai";
+    host.setProvider("team-gateway", { models: [{ id: "imported-model" }] });
+  });
+  assert.match(container.textContent, /模型适配器注册存在冲突/);
+  assert.match(container.textContent, /team-gateway/);
+  await click(button(container, "编辑"));
+  assert.equal(button(container, "保存设置").disabled, true);
+  assert.equal(button(container, "删除提供方 team-gateway").disabled, true);
+  assert.equal(fake.mutations.length, 0);
+});
+
+test("a registration conflict discovered during editing retains the unsaved model draft", async (t) => {
+  const { container, fake } = await mount(t, (host) => {
+    host.setProvider("team-gateway", { models: [{ id: "imported-model", name: "Imported" }] });
+  });
+  await click(button(container, "编辑"));
+  await input(container.querySelector('input[value="Imported"]'), "Unsaved model name");
+  fake.registration.blocked = "Registration changed outside this page";
+  await click(button(container, "保存模型"));
+  assert.equal(fake.mutations.length, 0);
+  assert.equal(container.querySelector('input[value="Unsaved model name"]').value, "Unsaved model name");
+  assert.match(container.textContent, /Registration changed outside this page/);
+  assert.equal(fake.view.value.providers["team-gateway"].models[0].name, "Imported");
 });

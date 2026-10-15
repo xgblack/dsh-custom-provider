@@ -25,7 +25,14 @@ assert.deepEqual(Array.from(client.inject), ["slots", "locale", "remote", "remot
 
 let registration;
 const services = {
-  remote: { $on: () => () => {} },
+  remote: {
+    $on: () => () => {},
+    $mount: async (contribution) => {
+      assert.equal(contribution.package, "dsh-custom-provider");
+      assert.equal(contribution.descriptors[0].method, "prepare");
+    }
+  },
+  "remote.customProviderRegistration": { prepare: async () => ({ ok: true, value: { repaired: false } }) },
   "remote.settings": {},
   "remote.credentials": {},
   "remote.llm": {}
@@ -59,6 +66,7 @@ assert.equal(typeof registration.options.inject, "function");
 assert.equal(typeof registration.component, "function");
 const injected = registration.options.inject();
 assert.equal(injected.api.settings, services["remote.settings"]);
+assert.deepEqual(JSON.parse(JSON.stringify(await injected.api.prepare())), { repaired: false });
 assert.equal(injected.api.credentials, services["remote.credentials"]);
 assert.equal(injected.api.llm, services["remote.llm"]);
 assert.equal(typeof injected.subscribeLocale, "function");

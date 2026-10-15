@@ -30,7 +30,7 @@ dsh 内置的 `llm-pi-ai` 适配器负责提供方 schema 和运行时行为，�
 
 ## 使用要求
 
-- 已启用 **Web Settings** 的 dsh 安装。
+- **dsh 0.2.1-alpha.3 或更新的 0.2.x 版本**，已启用 **Web Settings**。
 - 与 Web Settings 使用同一个 dsh profile 的内置 `llm-pi-ai` 插件。
 
 本项目不提供 LLM 适配器、网关路由或凭据后端，只管理现有的 `llm-pi-ai` 设置和远程服务。
@@ -105,6 +105,9 @@ bundle patch 已经注册一次插件，不要再添加相同 id 的 `dsh-custom
 页面遵循宿主 `llm-pi-ai` 的 schema 和存储边界：
 
 - 设置写入真实的 `llm-pi-ai` 命名空间，并通过带 revision 的 `remote.settings` 操作提交。
+- 导入和编辑只更新提供方及模型数据，不会再注册一个适配器。页面读取及每次保存前，宿主端会检查 `llm-pi-ai` 是否唯一注册。
+- 基础层已注册适配器，而 profile 又通过 `insert` 重复插入时，插件将冗余插入转成顶层按 id 覆盖配置，完整保留当前生效的模型配置与其他插件条目。修复使用宿主热重载队列、文件锁及原子写入；先在 profile patch 同目录保存权限受限的 `cordis.patch.yml.before-provider-registration-*.bak`，重载失败则还原原文件。
+- home/命令行覆盖、自定义启用参数及无法安全修复的冲突不会被强行改写。页面说明原因并转为只读；保存遇到冲突时保留草稿。编辑期间若修复了注册结构，应核对最新配置后重试。插件无法控制其他工具重新写入冲突配置。
 - 提交前执行客户端 schema 校验；宿主拒绝或 revision 冲突时保留未保存草稿。
 - 用户显式配置的模型列表会作为保留其他字段和同级模型的完整数组提交。
 - 已安装目录模型只写当前的 `modelOverrides.<模型 ID>`；只保存包含 ID 的对象即可恢复目录默认值。未被安装目录描述的声明路由改写完整的 `models` 列表；编辑或导入已有 `modelOverrides` 时会转换为该列表，并保留同路由其他已配置模型。
@@ -129,7 +132,7 @@ preview_home="$(mktemp -d "${TMPDIR:-/tmp}/dsh-custom-provider.XXXXXX")"
 DSH_HOME="$preview_home" dsh --profile web --patch "$PWD/test/local.patch.yml" --no-open --port 0
 ```
 
-`lib/client.js` 由 `lib/client.source.js`、`lib/config.js` 和 `lib/modelsdev.js` 生成并提交，因为 dsh 会直接加载它。
+`lib/client.js` 由 `lib/client.source.js`、`lib/config.js`、`lib/modelsdev.js` 和 `lib/registration-wire.js` 生成并提交，因为 dsh 会直接加载它。
 
 ## 范围与限制
 

@@ -249,7 +249,7 @@ assert.throws(() => addModelOperation(providerView, "deepseek", { id: "a" }), /a
 
 const schema = { rehydrate: () => ({}), validate: () => undefined };
 let mutation;
-const successApi = { settings: { mutate: async (...args) => {
+const successApi = { prepare: async () => ({ repaired: false }), settings: { mutate: async (...args) => {
   mutation = args;
   return { ok: true, value: { ...listed, revision: 8 } };
 } } };
@@ -263,26 +263,44 @@ assert.equal(writtenProvider.kind, "written");
 assert.deepEqual(mutation[1], patchProvider, "provider field operations are committed together");
 assert.equal(mutation[2], 12);
 let staleMutated = false;
-const staleDraft = await commitOperation({ settings: { mutate: async () => { staleMutated = true; } } },
+const staleDraft = await commitOperation({ prepare: async () => ({ repaired: false }), settings: { mutate: async () => { staleMutated = true; } } },
   schema, providerView, patchProvider, 11);
 assert.equal(staleDraft.kind, "conflict");
 assert.equal(staleMutated, false, "an old JSON draft never writes with a new revision");
 
 let invalidMutated = false;
-const invalid = await commitOperation({ settings: { mutate: async () => { invalidMutated = true; } } },
+const invalid = await commitOperation({ prepare: async () => ({ repaired: false }), settings: { mutate: async () => { invalidMutated = true; } } },
   { rehydrate: () => ({}), validate: () => "schema rejected model" }, listed, common);
 assert.deepEqual(invalid, { kind: "invalid", message: "schema rejected model" });
 assert.equal(invalidMutated, false, "schema failures do not reach the server");
 
-const refused = await commitOperation({ settings: { mutate: async () => ({
+const refused = await commitOperation({ prepare: async () => ({ repaired: false }), settings: { mutate: async () => ({
   ok: false, error: { code: "settings/invalid", message: "adapter rejected model" }
 }) } }, schema, listed, common);
 assert.deepEqual(refused, { kind: "rejected", message: "adapter rejected model" });
 
-const conflict = await commitOperation({ settings: { mutate: async () => ({
+const conflict = await commitOperation({ prepare: async () => ({ repaired: false }), settings: { mutate: async () => ({
   ok: false, error: { code: "settings/conflict", message: "stale revision" }
 }) } }, schema, listed, common);
 assert.deepEqual(conflict, { kind: "conflict", message: "stale revision" });
+
+let guardMutations = 0;
+const guardedMutation = async () => { guardMutations++; return { ok: true, value: listed }; };
+const blockedRegistration = await commitOperation({
+  prepare: async () => ({ repaired: false, blocked: "Adapter registration conflict" }),
+  settings: { mutate: guardedMutation }
+}, schema, listed, common);
+assert.deepEqual(blockedRegistration, { kind: "rejected", message: "Adapter registration conflict" });
+const repairedRegistration = await commitOperation({
+  prepare: async () => ({ repaired: true }), settings: { mutate: guardedMutation }
+}, schema, listed, common);
+assert.equal(repairedRegistration.kind, "conflict");
+const unavailableGuard = await commitOperation({
+  prepare: async () => { throw new Error("Registration guard unavailable"); }, settings: { mutate: guardedMutation }
+}, schema, listed, common);
+assert.equal(unavailableGuard.kind, "rejected");
+assert.match(unavailableGuard.message, /guard unavailable/);
+assert.equal(guardMutations, 0, "blocked, repaired and unavailable registrations never submit a stale settings write");
 
 const transferSource = {
   user: { providers: {

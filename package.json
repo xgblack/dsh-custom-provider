@@ -17,11 +17,20 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
-  "files": ["index.js", "lib/client.js", "cordis.patch.yml", "docs", "!docs/images"],
+  "files": [
+    "index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "docs",
+    "!docs/images",
+    "lib/profile-registration.js",
+    "lib/registration-guard.js",
+    "lib/registration-wire.js"
+  ],
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "prepack": "npm run build",
-    "test": "npm run build && node test/config.mjs && node test/client.mjs && node --test test/modelsdev.mjs test/render.mjs",
+    "test": "npm run build && node test/config.mjs && node test/client.mjs && node --test test/modelsdev.mjs test/render.mjs test/profile-registration.mjs && node --expose-internals --test test/registration-host.mjs",
     "test:config": "node test/config.mjs",
     "test:client": "node test/client.mjs"
   },
@@ -45,8 +54,31 @@
     "bundle": { "patch": "./cordis.patch.yml" }
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-config-editor": "0.2.1-alpha.3",
+    "@deepseek-ai/dsh-settings": "0.2.1-alpha.3",
+    "@deepseek-ai/dsh-typert-registry": "0.2.1-alpha.3",
     "jsdom": "26.1.0",
     "react": "18.3.1",
     "react-dom": "18.3.1"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-app-boot": ">=0.2.1-alpha.3 <0.3.0-0",
+    "@deepseek-ai/dsh-atomic-write": ">=0.2.1-alpha.3 <0.3.0-0",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.2.1-alpha.3 <0.3.0-0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-app-boot": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-atomic-write": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-typert-protocol": {
+      "optional": true
+    }
   }
 }

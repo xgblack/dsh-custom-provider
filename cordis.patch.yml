@@ -1,4 +1,4 @@
-# The host half only activates the client bundle; it registers no LLM routes.
+# The host checks/repairs duplicate adapter registrations; it registers no LLM routes.
 - insert:
     - id: dsh-custom-provider
       name: 'dsh-custom-provider'
