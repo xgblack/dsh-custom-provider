@@ -1,4 +1,4 @@
-# The host checks/repairs duplicate adapter registrations; it registers no LLM routes.
+# Register the client extension once; model adapters belong to the host.
 - insert:
     - id: dsh-custom-provider
       name: 'dsh-custom-provider'

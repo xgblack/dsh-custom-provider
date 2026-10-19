@@ -2,6 +2,8 @@
 
 把 `dsh-custom-provider` 发布到 npmjs.org 的操作手册，面向维护者。
 
+当前插件局部适配官方 Models 页组件，已验证 DSH `0.2.1-rc.2`。升级宿主需复核组件结构与真实页面测试。
+
 ## 前提
 
 - `package.json` 的 `publishConfig.registry` 固定为 `https://registry.npmjs.org/`
@@ -17,7 +19,7 @@ npm whoami --registry=https://registry.npmjs.org/
 
 # 2. 发布前检查
 npm test                # prepack 会重建 lib/client.js
-npm pack --dry-run      # 期望包含 index.js、lib/client.js、lib/profile-registration.js、lib/registration-guard.js、lib/registration-wire.js、cordis.patch.yml、package.json、README.md、LICENSE 与 docs/
+npm pack --dry-run      # 期望包含 index.js、lib/client.js、cordis.patch.yml、package.json、README.md、LICENSE 与 docs/
 npm publish --dry-run   # 期望 Publishing to https://registry.npmjs.org/
 
 # 3. 发布
@@ -32,6 +34,8 @@ npm view dsh-custom-provider version dist.tarball --registry=https://registry.np
 preview_home="$(mktemp -d "${TMPDIR:-/tmp}/dsh-plugin-add.XXXXXX")"
 DSH_HOME="$preview_home" dsh plugin --profile web add dsh-custom-provider
 ```
+
+发布前还应使用隔离 `DSH_HOME` 验证官方模型页：确认拉取和 JSON 编辑位于模型展开详情、导入导出位于页面标题右侧、独立模型配置导航消失，并核对原生表单字段同步及官方保存不会影响兄弟模型、未保存字段和请求头。
 
 ## 日常发版（首发之后）
 

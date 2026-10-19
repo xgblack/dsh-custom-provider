@@ -1,76 +1,52 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { test } from "node:test";
+import React from "react";
+import { SlotCore } from "@deepseek-ai/dsh-client-ui-slots";
 
-let plugin;
-const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
-vm.runInNewContext(source, {
-  window: { __ModuleLoader__: { load: (entry) => { plugin = entry; } } },
-  navigator: { language: "zh-CN" },
-  document: {
-    getElementById: () => null,
-    createElement: () => ({ remove() {} }),
-    head: { append() {} }
-  },
-  console
+function setup() {
+  let plugin;
+  vm.runInNewContext(readFileSync(new URL("../lib/client.js", import.meta.url), "utf8"), {
+    window: { __ModuleLoader__: { load: (entry) => { plugin = entry; } } },
+    document: { getElementById: () => null, createElement: () => ({ remove() {} }), head: { append() {} } }, console
+  });
+  const core = new SlotCore();
+  core.register({ name: "root", children: { "settings.section": { kind: "list", scope: "root" } } }, () => null);
+  function ModelsSection() { return null; }
+  core.register({ name: "settings.section", id: "models", inject: () => ({ native: true }), children: {
+    "settings.models.provider-card": { kind: "keyed", scope: "root" }, "settings.models.footer": { kind: "list", scope: "root" }
+  } }, ModelsSection);
+  const entry = core.entries("settings.section")[0];
+  const children = entry.children;
+  const injection = entry.inject;
+  const effects = [];
+  const services = { remote: { $on: () => () => {} }, "remote.settings": {}, "remote.llm": {} };
+  const client = plugin.factory((name) => { assert.equal(name, "react"); return React; });
+  const ctx = {
+    slots: { entries: (key) => core.entries(key), subscribe: (key, fn) => core.subscribe(key, fn), inject: (_name, callback) => callback() },
+    effect: (callback) => effects.push(callback()), settingsSchema: {}, get: (name) => services[name],
+    locale: { bind: (namespace) => { assert.equal(namespace, "settings.customProvider"); return (key) => key; }, register: () => () => {} }
+  };
+  return { client, ctx, entry, children, injection, effects, ModelsSection, core };
+}
+
+test("integration decorates the original Models entry, retaining native injection and child slots", () => {
+  const { client, ctx, entry, children, injection, effects, ModelsSection, core } = setup();
+  client.apply(ctx);
+  assert.deepEqual(Array.from(client.inject), ["slots", "locale", "remote.settings", "remote.llm", "settingsSchema"]);
+  assert.notEqual(entry.component, ModelsSection);
+  assert.equal(entry.inject, injection);
+  assert.equal(entry.children, children);
+  assert.equal(core.entries("settings.section").length, 1);
+  assert.equal(core.entries("settings.models.provider-card").length, 0, "no separate model-tools entry");
+  assert.equal(core.entries("settings.models.footer").length, 0, "no footer toolbar");
+  for (const dispose of effects.reverse()) dispose?.();
+  assert.equal(entry.component, ModelsSection, "unloading restores the official registration");
 });
 
-assert.equal(plugin.id, "dsh-custom-provider");
-const client = plugin.factory((name) => {
-  if (name === "react") return { createElement: () => ({}) };
-  assert.equal(name, "@deepseek-ai/dsh-client-ui-primitives");
-  return { Modal: () => null };
+test("an incompatible official section is rejected explicitly", () => {
+  const { client, ctx, entry } = setup();
+  entry.component = function ChangedModelsPage() { return null; };
+  assert.throws(() => client.apply(ctx), /incompatible.*0.2.1-rc.2/);
 });
-assert.deepEqual(Array.from(client.inject), ["slots", "locale", "remote", "remote.settings", "remote.credentials", "remote.llm", "settingsSchema"]);
-
-let registration;
-const services = {
-  remote: {
-    $on: () => () => {},
-    $mount: async (contribution) => {
-      assert.equal(contribution.package, "dsh-custom-provider");
-      assert.equal(contribution.descriptors[0].method, "prepare");
-    }
-  },
-  "remote.customProviderRegistration": { prepare: async () => ({ ok: true, value: { repaired: false } }) },
-  "remote.settings": {},
-  "remote.credentials": {},
-  "remote.llm": {}
-};
-client.apply({
-  slots: {
-    inject: (name, callback) => { assert.equal(name, "settings.section"); callback(); },
-    register: (options, component) => { registration = { options, component }; }
-  },
-  effect: (callback) => callback(),
-  locale: {
-    bind: (namespace) => {
-      assert.equal(namespace, "settings.customProvider");
-      return (key) => ({ nav: "模型配置" })[key] ?? key;
-    },
-    register: () => {},
-    subscribe: () => () => {},
-    getSnapshot: () => ({ active: "zh", revision: 0 }),
-    resolveText: (value) => value.zh
-  },
-  settingsSchema: {},
-  get: (name) => services[name]
-});
-
-assert.equal(registration.options.name, "settings.section");
-assert.equal(registration.options.id, "model-configuration");
-assert.equal(registration.options.order, 11);
-assert.equal(registration.options.label(), "模型配置");
-assert.equal(registration.options.locale, "settings.customProvider");
-assert.equal(typeof registration.options.inject, "function");
-assert.equal(typeof registration.component, "function");
-const injected = registration.options.inject();
-assert.equal(injected.api.settings, services["remote.settings"]);
-assert.deepEqual(JSON.parse(JSON.stringify(await injected.api.prepare())), { repaired: false });
-assert.equal(injected.api.credentials, services["remote.credentials"]);
-assert.equal(injected.api.llm, services["remote.llm"]);
-assert.equal(typeof injected.subscribeLocale, "function");
-assert.equal(injected.getLocaleRevision(), 0);
-assert.equal(injected.resolveText({ zh: "模型配置", en: "Model configuration" }), "模型配置");
-
-console.log("client: independent Model configuration section registration passed");

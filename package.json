@@ -1,7 +1,7 @@
 {
   "name": "dsh-custom-provider",
-  "version": "0.1.10",
-  "description": "用于 DeepSeek Harness 的模型配置插件，支持管理 llm-pi-ai 提供方、API 凭据、模型发现和单模型配置覆盖。仅提供增强模型配置，不修改官方模型配置页面",
+  "version": "0.2.0",
+  "description": "DeepSeek Harness 官方 Models 页增强插件：models.dev 元数据填充、配置导入导出和单模型 JSON 编辑",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/xgblack/dsh-custom-provider.git"
@@ -22,19 +22,22 @@
     "lib/client.js",
     "cordis.patch.yml",
     "docs",
-    "!docs/images",
-    "lib/profile-registration.js",
-    "lib/registration-guard.js",
-    "lib/registration-wire.js"
+    "!docs/images"
   ],
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "prepack": "npm run build",
-    "test": "npm run build && node test/config.mjs && node test/client.mjs && node --test test/modelsdev.mjs test/render.mjs test/profile-registration.mjs && node --expose-internals --test test/registration-host.mjs",
-    "test:config": "node test/config.mjs",
-    "test:client": "node test/client.mjs"
+    "test": "npm run build && node --expose-internals --test test/config.mjs test/client.mjs test/modelsdev.mjs test/render.mjs test/host.mjs",
+    "test:config": "node --test test/config.mjs",
+    "test:client": "node --test test/client.mjs"
   },
-  "keywords": ["deepseek-harness", "dsh", "llm", "model-settings", "pi-ai"],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "llm",
+    "model-settings",
+    "pi-ai"
+  ],
   "license": "MIT",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
@@ -46,39 +49,28 @@
         "@deepseek-ai/dsh-api-gateway",
         "@deepseek-ai/dsh-api-remotes",
         "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-settings-models",
-        "@deepseek-ai/dsh-client-ui-primitives"
+        "@deepseek-ai/dsh-client-ui-settings-models"
       ],
       "platform": "web"
     },
-    "bundle": { "patch": "./cordis.patch.yml" }
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-config-editor": "0.2.1-alpha.3",
-    "@deepseek-ai/dsh-settings": "0.2.1-alpha.3",
-    "@deepseek-ai/dsh-typert-registry": "0.2.1-alpha.3",
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-app-boot": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-brand": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings-models": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-config-editor": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-home-paths": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-launch-environment": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-scope": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-settings": "0.2.1-rc.2",
     "jsdom": "26.1.0",
     "react": "18.3.1",
     "react-dom": "18.3.1"
-  },
-  "dependencies": {
-    "yaml": "^2.9.1",
-    "zod": "^4.6.7"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/dsh-app-boot": ">=0.2.1-alpha.3 <0.3.0-0",
-    "@deepseek-ai/dsh-atomic-write": ">=0.2.1-alpha.3 <0.3.0-0",
-    "@deepseek-ai/dsh-typert-protocol": ">=0.2.1-alpha.3 <0.3.0-0"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-app-boot": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-atomic-write": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-typert-protocol": {
-      "optional": true
-    }
   }
 }

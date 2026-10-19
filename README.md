@@ -1,145 +1,81 @@
 # dsh-custom-provider
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-An independent provider and model configuration page for the built-in DeepSeek Harness `llm-pi-ai` adapter.
-
-The plugin adds **Model configuration** below dsh's official **Models** section. It lets you manage provider profiles, API endpoints, credentials, model lists, and per-model overrides without modifying the official Models page or injecting content into its provider cards.
+Model tools embedded in the official DeepSeek Harness **Models** settings page.
 
 [简体中文](docs/README.zh.md)
 
-## Why this plugin
+The official page manages providers, credentials, model lists, and reasoning capabilities. This plugin adds only:
 
-dsh's built-in `llm-pi-ai` adapter owns the provider schema and runtime behavior. This plugin provides a focused settings surface for that existing namespace:
+- **models.dev metadata**: fill a model's name, context window, output limit, and supported text/image inputs.
+- **Single-model JSON editing**: edit one model while preserving sibling models and advanced fields.
+- **Configuration import/export**: transfer selected `llm-pi-ai` provider profiles without credential values or request headers.
 
-- Manage catalog providers and user-defined custom API routes in one page.
-- Discover models through the adapter's model service before saving a custom provider.
-- Edit common model capabilities or the selected model's JSON without replacing sibling models.
-- Keep API keys in dsh's credential service instead of settings JSON.
-- Preserve dsh's revision and schema validation behavior for concurrent or invalid writes.
+The plugin registers no separate settings page and stores no separate model configuration.
 
-## Screenshots
+## Requirements and installation
 
-Set up provider routes, endpoints, and credentials in one page:
-
-![Provider configuration with a custom API route](docs/images/screen01.webp)
-
-Edit one model's capabilities and JSON without replacing its siblings:
-
-![Model settings editor](docs/images/screen02.webp)
-
-## Requirements
-
-- dsh **0.2.1-alpha.3 or newer in the 0.2.x series**, with the **Web Settings** surface enabled.
-- The built-in `llm-pi-ai` plugin enabled in the same dsh profile.
-
-This package does not provide an LLM adapter, gateway route, or credential backend. It only manages the existing `llm-pi-ai` settings and remotes.
-
-## Installation
-
-Install the published plugin into the `web` profile:
+Tested with DeepSeek Harness **0.2.1-rc.2**, with the Web Settings surface and the built-in `llm-pi-ai` adapter enabled. Older versions are not supported by this revision.
 
 ```sh
 dsh plugin --profile web add dsh-custom-provider
 ```
 
-To install directly from the GitHub repository instead:
-
-```sh
-dsh plugin --profile web add github:xgblack/dsh-custom-provider
-```
-
-To install a local checkout, run this from the repository root:
+For a local checkout, run from this repository:
 
 ```sh
 dsh plugin --profile web add "$PWD"
 ```
 
-Restart dsh, then open Web Settings and select **Model configuration** below **Models**.
+Restart DSH and open **Settings → Models**. The existing official provider cards remain the primary configuration surface.
 
-The bundled patch registers the plugin once. Do not add another `dsh-custom-provider` entry with the same id.
+## Model tools
 
-## Quick start
+Open a provider’s official **Edit** form, then expand a model’s **Model options**. Each `llm-pi-ai` model has **Fetch from models.dev** and an inline **Edit JSON** disclosure in its own details. There is no separate model picker or model-tools dialog. New custom providers use the same inline controls.
 
-1. Open dsh Web Settings and select **Model configuration** below **Models**.
-2. Select **Add model provider**.
-3. Choose a catalog provider, or choose **Custom model API** and enter a provider id, endpoint, and protocol.
-4. Enter the API key when the provider requires one. Select models in the discovery dialog, or add model IDs manually when the endpoint cannot list models. Only added models enter the provider draft.
-5. Save the provider and expand a model to edit its fields or JSON, or select **Fetch from models.dev** to import model metadata.
+Fetching updates that row’s official form fields and JSON together, without saving. It imports only `name`, `contextWindow`, `maxTokens`, and supported `input` values, leaving `reasoningEfforts`, `compat`, protocol settings, and credentials unchanged. Matching prefers the original full model ID, then its recognizable official provider, then the first matching bare ID. Requests share a six-hour in-memory cache; a failed refresh never imports an expired snapshot.
 
-Custom providers must use an explicit protocol. **Inherit catalog** is available only for installed catalog providers.
+Edit the row’s JSON and select **Apply to form**, then use the official provider **Save** button. The ID stays fixed in JSON; rename it through the native ID field. Native form edits update clean JSON automatically. If you have edited JSON and then change native fields, **Reset JSON** before editing again so neither draft silently overwrites the other. Unapplied JSON survives collapsing the model, and prevents provider Save until applied or reset. Saving also waits for metadata requests to finish.
 
-## Capabilities
+The official editor owns the provider draft, schema validation, inherited model behavior, persistence, and revision conflicts. Applying JSON or fetching metadata makes no separate settings write. Sibling model edits and unsaved provider fields stay in the same draft. Adapter refusals and revision conflicts are displayed by the official form without closing it.
 
-### Provider management
+This version uses a narrowly scoped adapter around the registered official Models components because DSH does not yet expose model-detail or page-header slots. It retains the original section, injection, child-slot ownership, controller, forms, and Save operations; it does not modify the installed application. Compatibility depends on the native component structure as well as slots. Recheck the real-page tests when upgrading DSH; do not assume a newer release is compatible solely from its version number.
 
-- Add installed catalog providers or define custom routes with an id, display name, endpoint, and protocol.
-- Edit display name, endpoint, and protocol for writable provider fields.
-- Delete configured providers from the **Model configuration** page, including routes inherited from the profile base layer. Deleting an inherited route writes a provider-list override that excludes it, so it does not reappear through inheritance. Other providers, their model settings, and their headers remain unchanged. Account sign-in and `deepseek-official` cannot be deleted from this page.
-- Fetch and filter models using the adapter-owned `remote.llm` service. Recognizable official model IDs use installed pi-ai catalog metadata ahead of the provider response.
-- For explicit model lists, both initial and repeat discovery use a model-selection dialog with nothing selected by default. Initial selection only updates the provider draft; on repeat discovery, only selected IDs not yet saved are appended. Fetching or cancelling never writes settings, and existing model entries remain unchanged. Catalog providers without an explicit list continue to refresh their displayed catalog.
-- A custom provider can be created with manually entered model IDs when its endpoint cannot list models. At least one model is required; manual entries and selected discovery results share the same draft without replacing each other. An ID-only model uses the host defaults (text input, 256K context, 32K output), not verified upstream limits; adjust its fields after creation if needed.
+## Configuration transfer
 
-### Model management
+**Import configuration** and **Export configuration** appear beside the official Models page title, in the same order and toolbar position as the previous plugin. Their preview opens directly below the title.
 
-- Add and remove models in an explicit user-owned `models` list. The last model cannot be removed on its own: a custom route needs at least one model, while an empty list on an installed-catalog route would restore the entire catalog. Remove the custom provider separately if it is no longer needed.
-- Use **Fetch from models.dev** to fill the editable name, context window, output limit, and supported text/image inputs. Review or adjust the fields, then click **Save model** to write them as user settings. Fetching alone does not save. Reasoning request values, `compat`, and other JSON fields are unaffected.
-- Match the original full model ID first, then its recognizable official provider (such as `deepseek/…` or `openai/…`), then the first matching bare ID. A six-hour Web-memory cache serves repeated imports; a failed refresh leaves the model configuration unchanged.
-- Customize installed catalog models through `modelOverrides.<model-id>` without copying the entire catalog.
-- Edit model name, context window, output limit, input types, and reasoning capability.
-- Reasoning levels come from the host schema, so the form offers exactly the levels `llm-pi-ai` accepts (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) and writes only the ticked ones. A level's request value is the wire spelling its gateway expects, and a blank `off` sends no reasoning parameter at all. A draft no adapter could serve — no level at all, a thinking level without a value, or `off` alone — is refused before the write, and a level key the host does not know is reported instead of rendered as a row, then removed by the next save.
-- Use capacity values such as `256K` and `1M`.
-- Open **Edit JSON** for the selected model only. The model id is fixed and sibling models remain untouched.
-- Keep composition-inherited model lists read-only because editing one row would otherwise replace the complete inherited list.
+Export selects configured provider profiles from the effective `llm-pi-ai.providers` settings, including profiles configured in the official page or inherited from a base layer. It omits API key values and custom request headers. `deepseek-account` and `deepseek-official` are excluded. Endpoint URLs may contain sensitive parameters, so inspect and protect the resulting file.
 
-## Data and write behavior
+Import accepts the existing version-1 `dsh-custom-provider/providers` JSON format. The preview shows source and destination model counts and whether each provider is new, user-configured, inherited, or layered. Existing providers default to **Skip**; new providers default to **Import**. **Replace** updates the transferred provider fields and model list, preserving destination headers. Unselected providers and the credential store are untouched.
 
-### Bulk provider transfer
+The file retains `apiKeyEnv` names. An imported profile may therefore use an existing credential reference on the destination. Configure missing credentials through the official page after importing. Inherited layers and the installed catalog still determine the final effective settings.
 
-Use **Export configuration** to select and download configured `llm-pi-ai` providers as a versioned JSON file, whether they were configured in this plugin, the official Models page, or the profile's base layer. The file contains each provider's effective profile, including explicit model lists, overrides, and advanced settings. Account sign-in (`deepseek-account`) and the built-in `deepseek-official` route are excluded. Unconfigured catalog entries and models available only through live discovery are not copied.
+Model writes use the official form’s save path. Imports use the official settings service, its schema, and the exact revision on which the import preview was based. An incompatible file or obsolete revision is rejected without silently adapting it.
 
-The export omits credential values and custom request headers. It retains `apiKeyEnv` reference names, so an imported route may use an existing credential with that name on the destination; check the reference and configure any missing key after import. Endpoint URLs can themselves contain sensitive parameters, so inspect and protect the JSON file accordingly. The destination's existing custom headers are never overwritten by an import because headers are outside the transfer boundary.
+## Upgrading from the independent configuration page
 
-Use **Import configuration** to review the file before writing. Existing routes are skipped by default, so their model parameters are not changed until you choose **Replace all models** individually or use the bulk replacement action. Replacement writes every transferred provider field and replaces the complete model list, while preserving the destination's existing `headers`; fields absent from the source are removed from the destination user layer. New routes are selected by default. The preview identifies whether a route is new, user-configured, inherited, or layered, and shows the source and destination model counts. The selected routes are validated and submitted together with the current settings revision. Import never deletes unselected routes or changes stored credentials. A route whose effective source and destination profiles are identical produces no write. The destination's inherited layers and installed model catalog still determine the final effective configuration; an incompatible file is rejected rather than adapted silently.
+Existing providers and models already live in the official `llm-pi-ai` namespace and require no migration. The old **Model configuration** navigation item is removed. The plugin no longer edits credentials or profile registrations, and no longer provides provider management, endpoint discovery, or its own reasoning form.
 
-The page follows the host `llm-pi-ai` schema and storage boundaries:
-
-- Settings writes target the real `llm-pi-ai` namespace through revisioned `remote.settings` operations. Import and edit update provider/model values; neither registers another adapter.
-- Before reading or saving, the host companion checks that `llm-pi-ai` is registered once. A redundant profile `insert` of the built-in adapter is converted into a top-level id-targeted config override, preserving its complete effective model settings and unrelated plugin entries. Repair uses the host reload queue, file lock and atomic write; it first saves a private `cordis.patch.yml.before-provider-registration-*.bak` beside the active profile patch and restores the original if reload fails.
-- Home/command-line adapter overrides, custom activation options and conflicts that cannot be repaired without changing other entries are blocked rather than silently overwritten. The page explains the conflict and leaves settings read-only; an interrupted save retains its draft. If registration is repaired while a draft is open, reload/review the current configuration before retrying. Other tools can still write conflicting patches; this plugin does not control those writers.
-- Client-side schema validation runs before a mutation is sent to dsh. Host rejection and revision conflicts keep the unsaved draft visible.
-- Explicit user model lists are replaced as a preserved array so hidden fields and sibling entries survive a single-model edit.
-- Installed-catalog model edits write only the selected `modelOverrides.<model-id>` entry. Saving an object containing only its id restores the catalog default. A declared route not described by the installed catalog instead writes a complete `models` list; editing or importing an existing `modelOverrides` entry converts it into that list while preserving the other configured models.
-- API keys are stored through `remote.credentials`, are never read back into a form, and are not written to settings JSON. Settings contain only the configured credential reference.
-- If credential storage fails after a provider settings write, the key can be retried without creating another provider.
+The package name stays `dsh-custom-provider`, so existing installations can upgrade in place. Keep one plugin registration; do not insert another `llm-pi-ai` adapter for this plugin.
 
 ## Development
 
-Node.js and npm are required for local development.
-
 ```sh
-npm install         # development dependencies
-npm run build       # regenerate lib/client.js
-npm test            # build + focused checks
-npm pack --dry-run  # inspect the published file set
+pnpm install
+npm run build
+npm test
+npm pack --dry-run --json
 ```
 
-Preview against an isolated profile, so test edits stay out of your normal dsh configuration:
+`lib/client.js` is generated from `lib/client.source.js`, `lib/config.js`, `lib/modelsdev.js`, and `lib/official-models.js` and committed because DSH loads it directly. Tests load the pinned official Models client and cover native draft synchronization and Save, inline JSON and conflict handling, import/export boundaries, adapter cleanup, and persistence through real DSH settings services.
+
+Use an isolated home for browser checks:
 
 ```sh
-preview_home="$(mktemp -d "${TMPDIR:-/tmp}/dsh-custom-provider.XXXXXX")"
+preview_home="$(mktemp -d "${TMPDIR:-/tmp}/dsh-model-tools.XXXXXX")"
 DSH_HOME="$preview_home" dsh --profile web --patch "$PWD/test/local.patch.yml" --no-open --port 0
 ```
 
-`lib/client.js` is generated from `lib/client.source.js`, `lib/config.js`, `lib/modelsdev.js`, and `lib/registration-wire.js`, then committed because dsh loads it directly.
-
-## Scope and limitations
-
-- Only the built-in `llm-pi-ai` adapter is managed here. Other dsh adapters keep their own settings pages.
-- This page is separate from the official Models page and includes some overlapping provider controls.
-
 ## Attribution and license
 
-This project is a fork of [Luck9Star/dsh-gateway-provider](https://github.com/Luck9Star/dsh-gateway-provider). The MIT license and copyright attribution are in [LICENSE](LICENSE).
-
-The project is released under the [MIT License](LICENSE).
+This project is a fork of [Luck9Star/dsh-gateway-provider](https://github.com/Luck9Star/dsh-gateway-provider). The MIT license and copyright attribution are preserved in [LICENSE](LICENSE).

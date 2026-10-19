@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createModelsDevLoader, enrichDiscoveredModels, findModelsDevMatch, matchModelsDev, modelsDevFields } from "../lib/modelsdev.js";
+import { createModelsDevLoader, findModelsDevMatch, matchModelsDev, modelsDevFields } from "../lib/modelsdev.js";
 
 const catalog = {
   "other/deepseek-v4.1-flash": { name: "Unrelated copy", limit: { context: 42 } },
@@ -34,33 +34,6 @@ test("explicit import maps supported fields, omitting reasoning and unsupported 
   });
   assert.deepEqual(modelsDevFields({ name: " ", limit: { context: -2, output: 0 }, modalities: { input: ["pdf"] }, reasoning: true }), {});
   assert.deepEqual(modelsDevFields(null), {});
-});
-
-test("pi-ai discovery takes precedence over upstream; missing fields retain upstream values without models.dev", async () => {
-  const queried = [];
-  const result = await enrichDiscoveredModels([
-    { id: "deepseek-v4-flash", name: "Gateway", contextWindow: 500000, maxTokens: 10000 },
-    { id: "gpt-6-sol", name: "Gateway GPT", contextWindow: 900000 },
-    { id: "unknown", name: "Custom" }
-  ], async (provider) => {
-    queried.push(provider);
-    return provider === "deepseek" ? [{
-      id: "deepseek-v4-flash", name: "Installed", contextWindow: 1000000, inputModalities: ["text"]
-    }] : [];
-  });
-  assert.deepEqual(queried, ["deepseek", "openai"]);
-  assert.deepEqual(result.models, [
-    { id: "deepseek-v4-flash", name: "Installed", contextWindow: 1000000, maxTokens: 10000, input: ["text"] },
-    { id: "gpt-6-sol", name: "Gateway GPT", contextWindow: 900000 },
-    { id: "unknown", name: "Custom" }
-  ]);
-  assert.equal(result.piAiError, "");
-});
-
-test("a pi-ai lookup error retains the provider discovery result and is reported", async () => {
-  const result = await enrichDiscoveredModels([{ id: "gpt-6-sol", maxTokens: 9000 }], async () => { throw new Error("unavailable"); });
-  assert.deepEqual(result.models, [{ id: "gpt-6-sol", maxTokens: 9000 }]);
-  assert.equal(result.piAiError, "openai: unavailable");
 });
 
 test("six-hour cache is shared across calls and preserves a stale snapshot on failure", async () => {
