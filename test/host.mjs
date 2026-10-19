@@ -50,12 +50,13 @@ async function fixture(t) {
   return { ctx, patchPath, view, entries };
 }
 
-test("real DSH settings persist a single-model edit without another adapter registration", async (t) => {
+test("real DSH settings persist model and advanced fields without another adapter registration", async (t) => {
   const { ctx, view, entries } = await fixture(t);
   const current = view();
-  const op = replaceModelOperation(current, "gateway", "a", { ...current.value.providers.gateway.models[0], maxTokens: 8192 });
+  const op = replaceModelOperation(current, "gateway", "a", { ...current.value.providers.gateway.models[0], maxTokens: 8192, compat: { supportsStore: false } });
   await ctx.settings.mutate("llm-pi-ai", [op], current.revision);
   assert.equal(view().value.providers.gateway.models[0].maxTokens, 8192);
+  assert.deepEqual(view().value.providers.gateway.models[0].compat, { supportsStore: false });
   assert.deepEqual(view().value.providers.gateway.models[1], original.providers.gateway.models[1]);
   assert.deepEqual(view().value.providers.gateway.headers, original.providers.gateway.headers);
   assert.deepEqual(view().value.providers.gateway.models[0].reasoningEfforts, { high: "high" });

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   candidate, commitOperation, editableModel, exportProviderBundle, modelEntries, modelMode,
-  parseModelJson, parseProviderBundle, providerImportOperations, providerTransferDiff,
+  parseModelJson, mergeModelJson, parseProviderBundle, providerImportOperations, providerTransferDiff,
   providerTransferState, replaceModelOperation
 } from "../lib/config.js";
 
@@ -31,10 +31,12 @@ test("editing one listed model preserves its sibling and leaves adapter fields u
   assert.equal(candidate(listed, op).providers.gateway.models[0].name, "Changed");
 });
 
-test("JSON parsing rejects invalid objects and changing the model identity", () => {
+test("JSON validates its object and ID, with an optional identity lock for direct writes", () => {
   assert.deepEqual(parseModelJson('{"id":"a","maxTokens":8192}', "a"), { id: "a", maxTokens: 8192 });
   assert.throws(() => parseModelJson("{", "a"), /Invalid JSON/);
   assert.throws(() => parseModelJson("[]", "a"), /must be an object/);
+  assert.throws(() => parseModelJson('{"name":"No ID"}'), /id must be a non-empty string/);
+  assert.deepEqual(parseModelJson('{"id":"renamed"}'), { id: "renamed" });
   assert.throws(() => parseModelJson('{"id":"b"}', "a"), /must remain a/);
   assert.throws(() => replaceModelOperation(listed, "gateway", "missing", { id: "missing" }), /not in the configured list/);
 });
@@ -130,4 +132,26 @@ test("replacement previews model changes and preserves destination headers and u
   assert.deepEqual(result.providers.added.models, [{ id: "new" }]);
   assert.throws(() => providerImportOperations(view, bundle, { gateway: "add" }), /changed since preview/);
   assert.throws(() => providerImportOperations(view, bundle, { added: "replace" }), /changed since preview/);
+});
+
+test("resumed JSON edits merge independent nested fields, removals and identical changes", () => {
+  const base = { id: "a", name: "A", maxTokens: 2048, compat: { supportsStore: false, supportsDeveloperRole: true } };
+  const current = { ...base, name: "Native", compat: { ...base.compat, supportsStore: true } };
+  const edited = { ...base, maxTokens: 4096, compat: { supportsStore: false } };
+  assert.deepEqual(mergeModelJson(base, current, edited), { id: "a", name: "Native", maxTokens: 4096, compat: { supportsStore: true } });
+  assert.deepEqual(mergeModelJson(base, { ...base, name: "Same" }, { ...base, name: "Same" }), { ...base, name: "Same" });
+  assert.throws(() => mergeModelJson(base, { ...base, name: "Native" }, { ...base, name: "JSON" }),
+    (error) => error.code === "MODEL_JSON_CONFLICT" && error.field === "name");
+});
+
+test("JSON merges preserve literal object keys without changing prototypes", () => {
+  const base = JSON.parse('{"id":"a","name":"A","__proto__":{"value":"base"}}');
+  const current = { ...base, name: "Native" };
+  const edited = JSON.parse('{"id":"a","name":"A","__proto__":{"value":"edited"},"constructor":{"fixture":true}}');
+  const merged = mergeModelJson(base, current, edited);
+  assert.equal(Object.getPrototypeOf(merged), Object.prototype);
+  assert.equal(Object.hasOwn(merged, "__proto__"), true);
+  assert.deepEqual(merged.__proto__, { value: "edited" });
+  assert.deepEqual(merged.constructor, { fixture: true });
+  assert.equal(merged.name, "Native");
 });

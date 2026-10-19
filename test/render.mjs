@@ -100,6 +100,7 @@ const primitives = new Proxy({
   Modal,
   Checkbox: ({ label, checked, disabled, onChange }) => React.createElement("label", null,
     React.createElement("input", { type: "checkbox", checked, disabled, onChange: (event) => onChange(event.target.checked) }), label),
+  Switch: ({ label, checked, disabled, onChange }) => React.createElement("button", { type: "button", role: "switch", "aria-label": label, "aria-checked": checked, disabled, onClick: () => onChange(!checked) }),
   Tooltip: ({ children }) => children,
   SegmentedControl: ({ options, value, onChange }) => React.createElement("div", { role: "tablist" }, options.map((option) =>
     React.createElement("button", { type: "button", role: "tab", key: option.value, "aria-selected": value === option.value, disabled: option.disabled, onClick: () => onChange(option.value) }, option.label)))
@@ -199,7 +200,7 @@ test("the real official page gets a title toolbar and inline tools only in expan
   assert.equal(container.querySelectorAll(".dcp-inline-tools").length, 1);
   assert.equal(container.querySelectorAll('button[aria-expanded="true"]').length, 1);
   assert.ok(container.querySelector('.dcp-inline-tools').parentElement.className.endsWith("modelAdvanced"));
-  assert.doesNotMatch(container.textContent, /模型增强|保存 JSON/);
+  assert.doesNotMatch(container.textContent, /模型增强|保存 JSON|应用到表单/);
   assert.equal(container.querySelector('[role="dialog"]'), null);
   fake.locale = "en"; await render();
   assert.ok(button(container, "Fetch from models.dev"));
@@ -229,50 +230,58 @@ test("metadata updates native fields and JSON together; only native Save persist
   assert.deepEqual(fake.view.value.providers.gateway.headers, { "X-Fixture": "keep" });
 });
 
-test("inline JSON applies to the current row, preserving native unsaved fields and other models", async (t) => {
+test("valid JSON immediately updates native fields and saves advanced fields with the provider", async (t) => {
   const { container, fake } = await mount(t);
   const row = await expand(container);
   await input(container.querySelector('input[aria-label="显示名称 2"]'), "Unsaved sibling");
   await input(row.querySelector("textarea"), '{"id":"gpt-6-sol","name":"JSON model","contextWindow":32000,"maxTokens":8192,"compat":{"supportsStore":true}}');
-  await click(button(row, "应用到表单"));
   assert.equal(fake.mutations.length, 0);
   assert.equal(container.querySelector('input[aria-label="显示名称 1"]').value, "JSON model");
   assert.equal(container.querySelector('input[aria-label="输出上限 1"]')?.value ?? container.querySelector('input[aria-label="最大输出 1"]')?.value ?? [...container.querySelectorAll('input[inputmode="numeric"]')][1].value, "8192");
   await click(button(container, "保存"));
   assert.equal(fake.view.value.providers.gateway.models[0].maxTokens, 8192);
+  assert.deepEqual(fake.view.value.providers.gateway.models[0].compat, { supportsStore: true });
   assert.equal(fake.view.value.providers.gateway.models[1].name, "Unsaved sibling");
 });
 
-test("invalid JSON and concurrent native edits retain the raw draft without overwriting the form", async (t) => {
+test("invalid JSON retains its text, blocks Save, and merges non-conflicting native edits when corrected", async (t) => {
   const { container, fake } = await mount(t);
   const row = await expand(container);
   const textarea = row.querySelector("textarea");
-  await input(textarea, '{"id":"changed"}'); await click(button(row, "应用到表单"));
-  assert.match(row.textContent, /must remain gpt-6-sol/);
-  assert.equal(textarea.value, '{"id":"changed"}'); assert.equal(fake.mutations.length, 0);
-  await input(textarea, '{"id":"gpt-6-sol","maxTokens":-1}'); await click(button(row, "应用到表单"));
+  const original = JSON.parse(textarea.value);
+  await input(textarea, '{"id":""}');
+  assert.match(row.textContent, /id must be a non-empty string/);
+  assert.equal(textarea.value, '{"id":""}');
+  assert.equal(button(container, "保存").disabled, true);
+  await input(textarea, '{"id":"gpt-6-sol","maxTokens":-1}');
   assert.match(row.textContent, /must be a positive integer/);
-  await input(textarea, '{"id":"gpt-6-sol","maxTokens":8192}');
-  await input(container.querySelector('input[aria-label="显示名称 1"]'), "Native change");
-  await click(button(row, "应用到表单"));
-  assert.match(row.textContent, /表单已有修改/);
-  assert.equal(textarea.value, '{"id":"gpt-6-sol","maxTokens":8192}');
+  assert.equal(fake.mutations.length, 0);
   await click(button(row, "重置 JSON"));
+  const edited = { ...original, maxTokens: 8192 };
+  const raw = JSON.stringify(edited).slice(0, -1);
+  await input(textarea, raw);
+  await input(container.querySelector('input[aria-label="显示名称 1"]'), "Native change");
+  assert.equal(textarea.value, raw, "native edits do not replace incomplete JSON");
+  await input(textarea, JSON.stringify(edited));
   assert.equal(JSON.parse(textarea.value).name, "Native change");
+  assert.equal(JSON.parse(textarea.value).maxTokens, 8192);
+  assert.equal(button(container, "保存").disabled, false);
+  await click(button(container, "保存"));
+  assert.equal(fake.view.value.providers.gateway.models[0].name, "Native change");
+  assert.equal(fake.view.value.providers.gateway.models[0].maxTokens, 8192);
 });
 
 test("the native Save keeps its draft after a settings refusal or revision conflict", async (t) => {
   const { container, fake } = await mount(t);
   const row = await expand(container);
   await input(row.querySelector("textarea"), '{"id":"gpt-6-sol","maxTokens":8192}');
-  await click(button(row, "应用到表单"));
   fake.refuse("adapter refused fixture");
   await click(button(container, "保存"));
   assert.match(container.textContent, /adapter refused fixture/);
   assert.equal(JSON.parse(row.querySelector("textarea").value).maxTokens, 8192);
   fake.refuse(undefined); fake.externalEdit();
   await click(button(container, "保存"));
-  assert.match(container.textContent, /changed|修改|冲突/);
+  assert.match(container.textContent, /这些设置已被其他地方改动/);
   assert.equal(JSON.parse(row.querySelector("textarea").value).maxTokens, 8192);
   assert.equal(fake.mutations.length, 0);
 });
@@ -291,7 +300,6 @@ test("read-only official forms disable inline edits while the header export rema
   const row = await expand(container);
   assert.equal(row.querySelector("textarea").disabled, true);
   assert.equal(button(row, "从 models.dev 拉取").disabled, true);
-  assert.equal(button(row, "应用到表单").disabled, true);
   await click(button(container, "导出配置"));
   assert.equal(button(container, "下载 JSON").disabled, false);
   assert.equal(fake.mutations.length, 0);
@@ -363,10 +371,10 @@ test("the header export download contains provider settings but no headers or ke
   assert.deepEqual(exported.providers.gateway.models, fake.view.value.providers.gateway.models);
 });
 
-test("unapplied JSON survives collapse and blocks native Save until it is applied or reset", async (t) => {
+test("incomplete JSON survives collapse and blocks native Save until corrected or reset", async (t) => {
   const { container, fake } = await mount(t);
   let row = await expand(container);
-  const raw = '{"id":"gpt-6-sol","maxTokens":8192}';
+  const raw = '{"id":"gpt-6-sol","maxTokens":8192';
   await input(row.querySelector("textarea"), raw);
   assert.equal(button(container, "保存").disabled, true);
   await click(container.querySelector('button[aria-label="模型选项 1"]'));
@@ -374,7 +382,7 @@ test("unapplied JSON survives collapse and blocks native Save until it is applie
   assert.equal(button(container, "保存").disabled, true);
   row = await expand(container);
   assert.equal(row.querySelector("textarea").value, raw);
-  await click(button(row, "应用到表单"));
+  await input(row.querySelector("textarea"), raw + "}");
   assert.equal(button(container, "保存").disabled, false);
   await click(button(container, "保存"));
   assert.equal(fake.view.value.providers.gateway.models[0].maxTokens, 8192);
@@ -394,7 +402,7 @@ test("metadata arriving after native edits is refused instead of overwriting the
   assert.equal(button(container, "保存").disabled, false);
 });
 
-test("deleting an earlier row preserves a sibling's pending JSON and applying edits the surviving model", async (t) => {
+test("deleting an earlier row preserves a sibling's realtime JSON draft", async (t) => {
   const { container, fake } = await mount(t);
   await expand(container);
   const second = await expand(container, 2);
@@ -403,7 +411,6 @@ test("deleting an earlier row preserves a sibling's pending JSON and applying ed
   await click(container.querySelector('button[aria-label="删除模型 1"]'));
   const survivor = container.querySelector(".dcp-inline-tools");
   assert.equal(survivor.querySelector("textarea").value, raw);
-  await click(button(survivor, "应用到表单"));
   await click(button(container, "保存"));
   assert.deepEqual(fake.view.value.providers.gateway.models, [{ id: "sibling", name: "Edited sibling", maxTokens: 4096 }]);
 });
@@ -426,4 +433,132 @@ test("new custom providers use inline model tools before the first official crea
   assert.equal(fake.mutations.length, 1);
   assert.equal(fake.view.value.providers["new-gateway"].models[0].name, "GPT-6 Sol");
   assert.equal(fake.view.value.providers.gateway.models[0].name, "Gateway GPT");
+});
+
+test("JSON typing preserves whitespace, caret and unknown advanced fields through native edits", async (t) => {
+  const { container, fake } = await mount(t);
+  const row = await expand(container);
+  const textarea = row.querySelector("textarea");
+  const value = { ...JSON.parse(textarea.value), contextWindow: 32000, input: ["text", "image"],
+    compat: { supportsStore: true }, advancedFixture: { nested: { value: "retained" } } };
+  const raw = "  " + JSON.stringify(value, null, 4) + "\n";
+  textarea.focus();
+  await input(textarea, raw);
+  assert.equal(textarea.value, raw);
+  assert.equal(document.activeElement, textarea);
+  assert.equal(textarea.selectionStart, raw.length, "the native echo does not rewrite the textarea");
+  const nextRaw = raw.replace('"retained"', '"re_tained"');
+  const caret = nextRaw.indexOf("re_tained") + 3;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set.call(textarea, nextRaw);
+    textarea.setSelectionRange(caret, caret);
+    textarea.dispatchEvent(new window.Event("input", { bubbles: true }));
+  });
+  assert.equal(textarea.value, nextRaw);
+  assert.equal(textarea.selectionStart, caret, "valid JSON does not move a caret inside the document");
+  value.advancedFixture.nested.value = "re_tained";
+  assert.equal(button(container, "保存").disabled, false);
+  const image = row.parentElement.querySelector('input[type="checkbox"]:not(:checked)');
+  assert.equal(image, null, "both native input types follow JSON");
+  await input(container.querySelector('input[aria-label="显示名称 1"]'), "Native name");
+  const after = JSON.parse(textarea.value);
+  assert.equal(after.name, "Native name");
+  assert.deepEqual(after.compat, value.compat);
+  assert.deepEqual(after.advancedFixture, value.advancedFixture);
+  await click(button(container, "保存"));
+  assert.deepEqual(fake.view.value.providers.gateway.models[0].advancedFixture, value.advancedFixture);
+});
+
+test("conflicting JSON and native edits are reported without overwriting either draft", async (t) => {
+  const { container, fake } = await mount(t);
+  const row = await expand(container);
+  const textarea = row.querySelector("textarea");
+  const edited = { ...JSON.parse(textarea.value), name: "JSON name" };
+  await input(textarea, JSON.stringify(edited).slice(0, -1));
+  await input(container.querySelector('input[aria-label="显示名称 1"]'), "Native name");
+  const raw = JSON.stringify(edited);
+  await input(textarea, raw);
+  assert.match(row.textContent, /name/);
+  assert.equal(button(container, "保存").disabled, true);
+  assert.equal(textarea.value, raw);
+  assert.equal(container.querySelector('input[aria-label="显示名称 1"]').value, "Native name");
+  await click(button(row, "重置 JSON"));
+  assert.equal(JSON.parse(textarea.value).name, "Native name");
+  assert.equal(button(container, "保存").disabled, false);
+  assert.equal(fake.mutations.length, 0);
+});
+
+test("JSON clears and updates native capacity and reasoning typing buffers", async (t) => {
+  const { container, fake } = await mount(t);
+  const row = await expand(container);
+  await input(container.querySelector('input[aria-label="上下文窗口 1"]'), "64K");
+  await input(container.querySelector('input[aria-label="high API 参数值"]'), "native-wire");
+  const textarea = row.querySelector("textarea");
+  const next = { ...JSON.parse(textarea.value), reasoningEfforts: { off: null, high: "json-wire" } };
+  delete next.contextWindow;
+  await input(textarea, JSON.stringify(next));
+  assert.equal(container.querySelector('input[aria-label="上下文窗口 1"]').value, "");
+  assert.equal(container.querySelector('input[aria-label="high API 参数值"]').value, "json-wire");
+  await input(container.querySelector('input[aria-label="high API 参数值"]'), "back-to-native");
+  assert.equal(JSON.parse(textarea.value).reasoningEfforts.high, "back-to-native");
+  await click(button(container, "保存"));
+  assert.equal(fake.view.value.providers.gateway.models[0].contextWindow, undefined);
+  assert.equal(fake.view.value.providers.gateway.models[0].reasoningEfforts.high, "back-to-native");
+});
+
+test("invalid visible-field values do not reach native controls or discard advanced fields", async (t) => {
+  const { container, fake } = await mount(t);
+  const row = await expand(container);
+  const textarea = row.querySelector("textarea");
+  const original = JSON.parse(textarea.value);
+  for (const fields of [{ name: {} }, { input: "image" }, { input: [] }, { reasoningEfforts: { high: {} } }]) {
+    const raw = JSON.stringify({ ...original, ...fields });
+    await input(textarea, raw);
+    assert.equal(textarea.value, raw);
+    assert.equal(textarea.getAttribute("aria-invalid"), "true");
+    assert.equal(button(container, "保存").disabled, true);
+    assert.equal(container.querySelector('input[aria-label="显示名称 1"]').value, "Gateway GPT");
+  }
+  const valid = { ...original, name: "Recovered", reasoningEfforts: false, compat: { supportsStore: true } };
+  await input(textarea, JSON.stringify(valid));
+  assert.equal(textarea.getAttribute("aria-invalid"), "false");
+  assert.equal(container.querySelector('[role="switch"][aria-label="推理等级 1"]').getAttribute("aria-checked"), "false");
+  assert.equal(container.querySelector('input[aria-label="high API 参数值"]'), null);
+  assert.equal(button(container, "保存").disabled, false);
+  await click(button(container, "保存"));
+  assert.deepEqual(fake.view.value.providers.gateway.models[0].compat, valid.compat);
+});
+
+test("advanced-only JSON edits preserve the native capacity and reasoning input spelling", async (t) => {
+  const { container, fake } = await mount(t);
+  const row = await expand(container);
+  const capacity = container.querySelector('input[aria-label="上下文窗口 1"]');
+  const wire = container.querySelector('input[aria-label="high API 参数值"]');
+  await input(capacity, "64K");
+  await input(wire, "  wire-with-spaces  ");
+  const textarea = row.querySelector("textarea");
+  const edited = { ...JSON.parse(textarea.value), compat: { supportsStore: true } };
+  await input(textarea, JSON.stringify(edited));
+  assert.equal(capacity.value, "64K");
+  assert.equal(wire.value, "  wire-with-spaces  ");
+  assert.equal(fake.mutations.length, 0);
+  await click(button(container, "保存"));
+  assert.deepEqual(fake.view.value.providers.gateway.models[0].compat, edited.compat);
+});
+
+test("JSON model renames synchronize the native ID without losing the editor or sibling", async (t) => {
+  const { container, fake } = await mount(t);
+  const row = await expand(container);
+  const textarea = row.querySelector("textarea");
+  textarea.focus();
+  const edited = { ...JSON.parse(textarea.value), id: "renamed-model" };
+  const raw = JSON.stringify(edited, null, 4);
+  await input(textarea, raw);
+  assert.equal(container.querySelector('input[aria-label="模型 ID 1"]').value, "renamed-model");
+  assert.equal(document.activeElement, textarea);
+  assert.equal(textarea.value, raw);
+  assert.equal(button(container, "保存").disabled, false);
+  await click(button(container, "保存"));
+  assert.equal(fake.view.value.providers.gateway.models[0].id, "renamed-model");
+  assert.equal(fake.view.value.providers.gateway.models[1].id, "sibling");
 });
