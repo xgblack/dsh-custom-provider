@@ -1,6 +1,6 @@
 {
   "name": "dsh-custom-provider",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DeepSeek Harness 官方 Models 页增强插件：models.dev 元数据填充、配置导入导出和单模型 JSON 编辑",
   "repository": {
     "type": "git",
